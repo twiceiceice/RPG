@@ -93,7 +93,11 @@ export class HuntingView{
       const fill=add(bar,new THREE.PlaneGeometry(.99,.046),new THREE.MeshBasicMaterial({color:e.kind==='rabbit'?0xe9d99a:0x9bea92}),0,0,.005);
       const proxy=add(root,new THREE.SphereGeometry(e.kind==='rabbit'?.48:.78,8,6),new THREE.MeshBasicMaterial({visible:false}),0,e.height*.5,0);
       proxy.userData.entityId=e.id;this.proxies.push(proxy);
-      this.creatures.set(e.id,{root,bar,fill,proxy,...look});
+      const opening=new THREE.Group();root.add(opening);opening.position.y=e.height+.78;
+      const gold=new THREE.MeshBasicMaterial({color:0xffd875});
+      for(let i=0;i<3;i++){const angle=i*Math.PI*2/3;add(opening,new THREE.OctahedronGeometry(.09),gold,Math.cos(angle)*.36,0,Math.sin(angle)*.36);}
+      opening.visible=false;
+      this.creatures.set(e.id,{root,bar,fill,proxy,opening,...look});
     }
     this.heldSword=makeSword();this.heldSword.position.set(0,-.50,.045);avatar.arms[1].add(this.heldSword);
     const skin=avatar.arms[0].children[1].material,jacket=avatar.arms[0].children[0].material;
@@ -134,6 +138,9 @@ export class HuntingView{
     for(const e of this.hunting.entities){
       const v=this.creatures.get(e.id);v.root.visible=e.alive;v.proxy.visible=e.alive;
       v.root.position.set(e.x,e.y,e.z);v.root.rotation.y=e.heading;v.g.position.y=e.hop;v.proxy.position.y=e.height*.5+e.hop;
+      const vulnerable=e.offBalance>0,wobble=vulnerable?Math.min(1,e.offBalance/.3)*(e.stagger>0?.23:.12):0;
+      v.g.rotation.z=Math.sin(this.hunting.time*12+e.variant)*wobble;v.g.rotation.x=Math.cos(this.hunting.time*9)*wobble*.4;
+      v.opening.visible=vulnerable;v.opening.rotation.y=this.hunting.time*2.8;v.opening.position.y=e.height+.78+e.hop;
       if(e.kind==='slime'){
         const squash=e.windup>0?1-Math.sin(e.windup/.5*Math.PI)*.22:1+Math.sin(e.phase)*.06;
         v.g.scale.set(1/Math.sqrt(squash),squash,1/Math.sqrt(squash));
@@ -142,6 +149,7 @@ export class HuntingView{
       v.bar.visible=e.alive&&(e.hp<e.maxHp||e.alert)&&Math.hypot(e.x-this.camera.position.x,e.z-this.camera.position.z)<28;
       v.bar.position.set(e.x,e.y+e.height+.45+e.hop,e.z);v.bar.quaternion.copy(this.camera.quaternion);
       v.fill.scale.x=e.hp/e.maxHp;v.fill.position.x=-.495*(1-e.hp/e.maxHp);
+      v.fill.material.color.setHex(vulnerable?0xffd875:e.kind==='rabbit'?0xe9d99a:0x9bea92);
     }
     const active=new Set(this.hunting.arrows.map(a=>a.id));
     for(const [id,object] of this.projectiles)if(!active.has(id)){this.scene.remove(object);this.projectiles.delete(id);}

@@ -2,9 +2,9 @@ import { terrainHeight } from './movement.js';
 
 export const WARRIOR_SKILLS = [
   { id: 'charge', key: '1', name: '돌진', detail: '전방으로 돌파', duration: .52, cooldown: 4 },
-  { id: 'slam', key: '2', name: '천붕격', detail: '도끼를 땅에 내려찍기', duration: .92, cooldown: 3.5 },
-  { id: 'kick', key: '3', name: '비룡각', detail: '박힌 도끼를 짚고 날아차기', duration: .88, cooldown: 1.2 },
-  { id: 'sweep', key: '4', name: '열풍참', detail: '도끼를 뽑으며 가로 베기', duration: .94, cooldown: 1.4 },
+  { id: 'slam', key: '2', name: '내려찍기', detail: '도끼를 땅에 내려찍기', duration: .92, cooldown: 3.5 },
+  { id: 'kick', key: '3', name: '날아차기', detail: '박힌 도끼를 짚고 날아차기', duration: .88, cooldown: 1.2 },
+  { id: 'sweep', key: '4', name: '가로베기', detail: '도끼를 뽑으며 가로 베기', duration: .94, cooldown: 1.4 },
 ];
 const skillById = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, s]));
 const followups = { charge: ['slam'], slam: ['kick', 'sweep'], kick: ['sweep'], sweep: [], slash: [] };
@@ -26,9 +26,9 @@ export class Warrior {
     if (!player.grounded) return '땅에 발을 딛은 뒤 사용해 주세요.';
     if (this.cooldowns[id] > 0) return `${skillById[id].name} 재사용까지 ${this.cooldowns[id].toFixed(1)}초`;
     if (this.combat.cooldown > 0) return '기본 공격이 끝나면 사용할 수 있어요.';
-    if (['kick', 'sweep'].includes(id) && !this.planted) return '2번 천붕격으로 먼저 도끼를 박아 주세요.';
-    if (id === 'kick' && this.planted?.kicked) return '4번 열풍참으로 도끼를 뽑아 마무리하세요.';
-    if (['charge', 'slam'].includes(id) && this.planted) return '4번 열풍참으로 도끼를 먼저 뽑아 주세요.';
+    if (['kick', 'sweep'].includes(id) && !this.planted) return '2번 내려찍기로 먼저 도끼를 박아 주세요.';
+    if (id === 'kick' && this.planted?.kicked) return '4번 가로베기로 도끼를 뽑아 마무리하세요.';
+    if (['charge', 'slam'].includes(id) && this.planted) return '4번 가로베기로 도끼를 먼저 뽑아 주세요.';
     return null;
   }
   request(id, player, direction) {
@@ -71,7 +71,7 @@ export class Warrior {
       else input.forcedVelocity = { x: 0, z: 0 };
     }
   }
-  hitArea(player, { x = player.x, z = player.z, radius, damage, cone = -.2, knock = 3, stagger = .3 }) {
+  hitArea(player, { x = player.x, z = player.z, radius, damage, cone = -.2, knock = 3, stagger = .3, offBalance = 0 }) {
     const a = this.active, combat = this.combat; let hits = 0;
     for (const e of combat.entities) {
       if (!e.alive || a.hitIds.has(e.id)) continue;
@@ -80,6 +80,7 @@ export class Warrior {
       if (distance > .15 && (ex * a.dx + ez * a.dz) / distance < cone) continue;
       if (!combat.unobstructed({ x: player.x, y: player.y + .9, z: player.z }, { x: e.x, y: e.y + .6 + e.hop, z: e.z })) continue;
       a.hitIds.add(e.id); combat.damageEntity(e, damage, a.dx, a.dz);
+      if (offBalance > 0) combat.applyOffBalance(e, offBalance);
       e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);
       hits++;
     }
@@ -114,7 +115,7 @@ export class Warrior {
         a.anchor = { ...this.planted };
         this.hitArea(player, { x, z, radius: 1.65, damage: 26, cone: -.1, knock: .6, stagger: 1.65 }); this.impact(player, 'slam', x, z);
       } else if (a.id === 'kick') {
-        this.hitArea(player, { radius: 3.0, damage: 18, cone: .45, knock: 3.5, stagger: 1.2 }); this.impact(player, 'kick', player.x + a.dx * 1.8, player.z + a.dz * 1.8);
+        this.hitArea(player, { radius: 3.0, damage: 18, cone: .45, knock: 3.5, stagger: 1.2, offBalance: 4 }); this.impact(player, 'kick', player.x + a.dx * 1.8, player.z + a.dz * 1.8);
         if (this.planted) { this.planted.kicked = true; this.planted.remaining = 3.0; }
       } else if (a.id === 'sweep') {
         this.hitArea(player, { radius: 3.5, damage: 38, cone: -.35, knock: 7, stagger: .8 }); this.impact(player, 'sweep'); this.planted = null;

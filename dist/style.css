@@ -27,3 +27,8 @@
 @media(pointer:coarse){#warrior-hud{bottom:23px}.touch-actions{bottom:178px}#joystick{bottom:180px}body[data-weapon=axe] .weapon-bar{top:219px;bottom:auto;left:22px;transform:none}.weapon-bar{bottom:25px}#toast{bottom:305px}}
 @media(max-height:620px) and (min-width:561px){#warrior-hud{bottom:65px}.skill-slot{height:63px}body[data-weapon=axe] .weapon-bar{bottom:19px}.combo-info strong{display:none}.combo-info{padding:5px 8px}#toast{bottom:188px}}
 @media(pointer:coarse) and (max-height:620px){#joystick{bottom:22px}.touch-actions{bottom:28px}}
+#critical-opening{margin:0 0 7px;padding:8px 10px;border:1px solid #efc76c85;border-radius:9px;background:#3b3322ed;color:#ffdc88;text-align:center;font-size:13px;font-weight:600;box-shadow:0 3px 16px #172c2530}
+#target-info{flex-wrap:wrap;justify-content:center;max-width:calc(100% - 40px);row-gap:5px}#target-opening{flex-basis:100%;text-align:center;color:#ffdc88;font-size:12px}
+.damage-number.critical{font-size:29px;color:#ffcf6b;white-space:nowrap;text-shadow:0 2px 3px #50300e,0 0 12px #442608aa}.damage-number.off-balance{font-size:15px;color:#ffdf8c;white-space:nowrap;text-shadow:0 2px 3px #433017}
+body[data-weapon=axe]:has(#critical-opening:not([hidden])) #toast{bottom:320px}
+@media(max-height:620px){body[data-weapon=axe]:has(#critical-opening:not([hidden])) #toast{bottom:252px}}

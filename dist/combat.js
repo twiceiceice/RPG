@@ -30,6 +30,7 @@ export class Hunting {
     this.weapon='sword';this.cooldown=0;this.swing=0;this.hp=100;this.invincible=0;
     this.drawing=false;this.charge=0;this.release=0;this.lastCharge=0;
     this.hurt=0;this.sinceHit=100;this.kills={rabbit:0,slime:0};this.time=0;this.nextArrow=1;
+    this.criticalHits=0;this.lastHit=null;
     this.warrior=new Warrior(this);
     const rabbits=[[-3,2],[4,-2],[-5,-10],[10,-11],[-13,5],[12,10]];
     const slimes=[[4,-9],[-2,-17],[12,-22],[-14,-23],[20,-6]];
@@ -37,7 +38,7 @@ export class Hunting {
       spots.forEach(([x,z],i)=>this.entities.push({id:`${kind}-${i+1}`,kind,x,z,y:terrainHeight(x,z),homeX:x,homeZ:z,
         hp:kind==='rabbit'?24:72,maxHp:kind==='rabbit'?24:72,radius:kind==='rabbit'?.43:.72,height:kind==='rabbit'?.8:1.3,
         alive:true,respawn:0,heading:i*1.9,brain:1+i*.31,phase:i*2,hop:0,flash:0,windup:0,recovery:0,alert:false,moving:false,
-        knockX:0,knockZ:0,stagger:0,variant:i%3}));
+        knockX:0,knockZ:0,stagger:0,offBalance:0,variant:i%3}));
     }
   }
   equip(weapon) {
@@ -47,14 +48,22 @@ export class Hunting {
   }
   restorePlayer() {
     this.cancelDraw();this.warrior.cancel(true);this.hp=100;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
-    this.arrows.length=0;for(const e of this.entities){e.windup=0;e.recovery=Math.max(e.recovery,1);}
+    this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
   }
   unobstructed(a,b) { return !this.colliders.some(box=>{const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
   damageEntity(e,damage,dx,dz) {
-    if(!e.alive)return;
+    if(!e.alive||damage<=0)return;
+    const critical=e.offBalance>0;
+    if(critical){damage*=2;e.offBalance=0;this.criticalHits++;}
     e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=dx*4;e.knockZ=dz*4;
-    this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height,z:e.z,damage,kind:e.kind});
-    if(e.hp===0){e.alive=false;e.respawn=e.kind==='rabbit'?13:17;this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});}
+    this.lastHit={targetId:e.id,damage,critical,time:this.time};
+    this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height,z:e.z,damage,critical,kind:e.kind});
+    if(e.hp===0){e.alive=false;e.offBalance=0;e.respawn=e.kind==='rabbit'?13:17;this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});}
+  }
+  applyOffBalance(e,seconds) {
+    if(!e.alive)return;
+    e.offBalance=seconds;
+    this.events.push({type:'off-balance',id:e.id,x:e.x,y:e.y+e.height,z:e.z});
   }
   beginDraw() {
     if(this.weapon!=='bow'||this.hp<=0||this.cooldown>0||this.drawing)return false;
@@ -115,6 +124,7 @@ export class Hunting {
     this.time+=dt;this.cooldown=Math.max(0,this.cooldown-dt);this.swing=Math.max(0,this.swing-dt);this.release=Math.max(0,this.release-dt);
     if(this.drawing)this.charge=Math.min(1,this.charge+dt/1.05);
     this.invincible=Math.max(0,this.invincible-dt);this.hurt=Math.max(0,this.hurt-dt);this.sinceHit+=dt;
+    for(const e of this.entities)e.offBalance=Math.max(0,e.offBalance-dt);
     this.warrior.update(dt,player);
     if(this.hp>0&&this.sinceHit>6)this.hp=Math.min(100,this.hp+4*dt);
     for(const e of this.entities) {
@@ -122,7 +132,7 @@ export class Hunting {
       if(!e.alive){
         e.respawn-=dt;
         if(e.respawn<=0&&Math.hypot(e.homeX-player.x,e.homeZ-player.z)>(e.kind==='slime'?9:4)) {
-          Object.assign(e,{x:e.homeX,z:e.homeZ,y:terrainHeight(e.homeX,e.homeZ),hp:e.maxHp,alive:true,windup:0,recovery:1,knockX:0,knockZ:0,hop:0,stagger:0});
+          Object.assign(e,{x:e.homeX,z:e.homeZ,y:terrainHeight(e.homeX,e.homeZ),hp:e.maxHp,alive:true,windup:0,recovery:1,knockX:0,knockZ:0,hop:0,stagger:0,offBalance:0});
           this.events.push({type:'spawn',x:e.x,y:e.y,z:e.z,kind:e.kind});
         }
         continue;
