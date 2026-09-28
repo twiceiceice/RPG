@@ -1,6 +1,8 @@
 import * as THREE from './vendor/three.module.js';
 import { Movement } from './movement.js';
 import { createEnvironment, createAvatar } from './environment.js';
+import { Hunting } from './combat.js';
+import { HuntingView } from './hunting-view.js';
 
 const $ = id => document.getElementById(id);
 const world = $('world'), loading = $('loading');
@@ -23,6 +25,8 @@ const camera = new THREE.PerspectiveCamera(57, innerWidth / innerHeight, .08, 22
 const environment = createEnvironment(scene);
 const avatar = createAvatar(scene);
 const player = new Movement(environment.colliders);
+const hunting = new Hunting(environment.colliders);
+const huntingView = new HuntingView(scene, camera, avatar, hunting, environment);
 const coarsePointer = matchMedia('(pointer:coarse)').matches;
 const keys = new Set();
 let started = false, paused = true, locked = false, firstPerson = false;
@@ -31,6 +35,8 @@ let touchX = 0, touchZ = 0, touchSprint = false, dragging = null, toastTimer;
 const focus = new THREE.Vector3(), desired = new THREE.Vector3(), offset = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
 const input = { x: 0, z: 0, sprint: false };
+const floatingHits = [];
+let hitFeedback = 0;
 
 function notify(message) {
   $('toast').textContent = message; $('toast').hidden = false;
@@ -43,7 +49,7 @@ function capturePointer(element, pointerId) {
 }
 function setPaused(value) {
   paused = value; clearInput(); accumulator = 0;
-  $('resume').hidden = !value || !started || $('help-dialog').open;
+  $('resume').hidden = !value || !started || $('help-dialog').open || hunting.hp <= 0;
   if (value && document.pointerLockElement) document.exitPointerLock();
 }
 async function lockMouse() {
@@ -52,24 +58,51 @@ async function lockMouse() {
     if (!renderer.domElement.requestPointerLock) throw new Error('unsupported');
     await renderer.domElement.requestPointerLock();
   } catch {
-    notify('마우스를 누른 채 움직여 둘러보세요. Q · E 키로도 회전할 수 있어요.');
+    notify('우클릭 드래그로 시점 회전 · 좌클릭 또는 F로 공격해요.');
   }
 }
 function play() {
+  if (hunting.hp <= 0) return;
   started = true; setPaused(false); $('welcome').hidden = true;
+  $('crosshair').hidden = false;
   world.focus({ preventScroll: true }); void lockMouse();
 }
 function setView(mode) {
   firstPerson = mode === 'first';
   $('view-label').textContent = firstPerson ? '1인칭' : '3인칭';
   $('view-button').setAttribute('aria-label', `${firstPerson ? '1인칭' : '3인칭'} 사용 중, 시점 전환`);
-  $('crosshair').hidden = !firstPerson; avatar.root.visible = !firstPerson;
+  $('crosshair').hidden = !started; avatar.root.visible = !firstPerson;
   updateCamera(1, true);
 }
 function resetPosition() {
+  const reviving = hunting.hp <= 0;
   player.reset(); yaw = .16; pitch = .29; clearInput();
-  updateCamera(1, true); updateHUD(); notify('시작의 들판으로 돌아왔어요.');
+  hunting.restorePlayer(); avatar.root.rotation.y = Math.PI;
+  $('defeat').hidden = true;
+  if (reviving && started) setPaused(false);
+  updateCamera(1, true); updateHUD(); notify('시작 위치에서 체력을 회복했어요.');
 }
+function equipWeapon(weapon) {
+  hunting.equip(weapon);
+  const bow = weapon === 'bow';
+  for (const [id, selected] of [['sword-button', !bow], ['bow-button', bow]]) {
+    $(id).classList.toggle('selected', selected); $(id).setAttribute('aria-pressed', String(selected));
+  }
+  $('weapon-name').textContent = bow ? '들판의 활' : '여행자의 칼';
+  $('weapon-hint').textContent = bow ? '클릭 / F · 중앙 조준 · 무한 화살' : '클릭 / F · 가까이서 베기';
+  if (bow && pitch > .10) pitch = .08;
+  updateCamera(1, true); world.focus({ preventScroll: true });
+}
+function attack() {
+  if (!started || paused || hunting.hp <= 0) return false;
+  const aim = huntingView.aim();
+  const attacked = hunting.attack(player, { x: -Math.sin(yaw), y: aim.direction.y, z: -Math.cos(yaw) }, aim.point);
+  if (attacked) avatar.root.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
+  return attacked;
+}
+$('sword-button').addEventListener('click', () => equipWeapon('sword'));
+$('bow-button').addEventListener('click', () => equipWeapon('bow'));
+$('revive-button').addEventListener('click', () => { resetPosition(); play(); });
 $('play-button').addEventListener('click', play);
 $('resume-button').addEventListener('click', play);
 $('view-button').addEventListener('click', () => { setView(firstPerson ? 'third' : 'first'); world.focus(); });
@@ -78,26 +111,29 @@ $('help-button').addEventListener('click', () => {
   $('help-dialog').showModal(); setPaused(true);
 });
 $('close-help').addEventListener('click', () => $('help-dialog').close());
-$('help-dialog').addEventListener('close', () => { $('resume').hidden = !started; });
+$('help-dialog').addEventListener('close', () => { $('resume').hidden = !started || hunting.hp <= 0; });
 document.addEventListener('pointerlockchange', () => {
   const wasLocked = locked; locked = document.pointerLockElement === renderer.domElement;
-  document.querySelector('.mouse-guide').textContent = locked ? '마우스 시점 · Esc 쉬기' : '마우스 드래그 · 시점';
+  document.querySelector('.mouse-guide').textContent = locked ? '마우스 시점 · Esc 쉬기' : '우클릭 드래그 · 시점';
   if (wasLocked && !locked) setPaused(true);
 });
 document.addEventListener('pointerlockerror', () => {
-  if (started && !paused) notify('마우스 드래그 또는 Q · E 키로 둘러보세요.');
+  if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · F 공격');
 });
 document.addEventListener('keydown', event => {
   if ($('help-dialog').open) return;
-  if (event.code === 'Escape') { if (started && !locked) setPaused(!paused); return; }
+  if (event.code === 'Escape') { if (started && !locked && hunting.hp > 0) setPaused(!paused); return; }
   if (event.code === 'Enter' && !started) { play(); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   if (event.repeat) return;
   if (event.code === 'KeyV') setView(firstPerson ? 'third' : 'first');
   if (event.code === 'KeyR') resetPosition();
+  if (event.code === 'Digit1') equipWeapon('sword');
+  if (event.code === 'Digit2') equipWeapon('bow');
   if (!started || paused) return;
   keys.add(event.code);
   if (event.code === 'Space') player.jump();
+  if (event.code === 'KeyF') attack();
 });
 document.addEventListener('keyup', event => keys.delete(event.code));
 window.addEventListener('blur', () => { if (started) setPaused(true); });
@@ -109,7 +145,8 @@ function look(dx, dy) {
 document.addEventListener('mousemove', event => { if (locked && !paused) look(event.movementX, event.movementY); });
 world.addEventListener('contextmenu', event => event.preventDefault());
 world.addEventListener('pointerdown', event => {
-  if (!started || paused || locked) return;
+  if (!started || paused) return;
+  if (locked) { if (event.button === 0) attack(); return; }
   dragging = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: 0, type: event.pointerType, button: event.button };
   capturePointer(world, event.pointerId); world.focus();
 });
@@ -124,7 +161,7 @@ window.addEventListener('pointerup', event => {
   const click = dragging.moved < 5 && dragging.type === 'mouse' && dragging.button === 0;
   dragging = null;
   if (world.hasPointerCapture(event.pointerId)) world.releasePointerCapture(event.pointerId);
-  if (click) void lockMouse();
+  if (click) attack();
 });
 world.addEventListener('pointercancel', () => { dragging = null; });
 world.addEventListener('wheel', event => {
@@ -154,6 +191,7 @@ for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) joystic
   stickPointer = null; touchX = touchZ = 0; $('stick').style.transform = '';
 });
 $('touch-jump').addEventListener('pointerdown', event => { event.preventDefault(); if (started && !paused) player.jump(); });
+$('touch-attack').addEventListener('pointerdown', event => { event.preventDefault(); attack(); });
 $('touch-run').addEventListener('click', () => { touchSprint = !touchSprint; $('touch-run').setAttribute('aria-pressed', String(touchSprint)); });
 function updateInput(dt) {
   if (keys.has('KeyQ')) yaw += 1.8 * dt;
@@ -181,16 +219,21 @@ function updateCamera(dt, immediate = false) {
   }
   focus.set(player.x, player.y + 1.22, player.z);
   desired.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(cameraDistance).add(focus);
+  const bow = hunting.weapon === 'bow';
+  if (bow) { focus.y += .22; desired.y += .22; desired.x += Math.cos(yaw) * .68; desired.z -= Math.sin(yaw) * .68; }
   safeCameraPosition(focus, desired);
   if (immediate) camera.position.copy(desired);
   else camera.position.lerp(desired, 1 - Math.exp(-14 * dt));
   safeCameraPosition(focus, camera.position);
-  camera.lookAt(focus);
+  if (bow) camera.lookAt(camera.position.x - Math.sin(yaw) * Math.cos(pitch) * 30, camera.position.y - Math.sin(pitch) * 30, camera.position.z - Math.cos(yaw) * Math.cos(pitch) * 30);
+  else camera.lookAt(focus);
 }
 function animateAvatar(dt, time) {
   const speed = Math.hypot(player.vx, player.vz);
   avatar.root.position.set(player.x, player.y, player.z);
-  if (speed > .15) {
+  if (hunting.weapon === 'bow' || hunting.swing > 0) {
+    avatar.root.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
+  } else if (speed > .15) {
     const angle = Math.atan2(player.vx, player.vz);
     const delta = Math.atan2(Math.sin(angle - avatar.root.rotation.y), Math.cos(angle - avatar.root.rotation.y));
     avatar.root.rotation.y += delta * (1 - Math.exp(-16 * dt));
@@ -206,6 +249,41 @@ function updateHUD() {
   $('coordinates').textContent = `${player.x.toFixed(0)} / ${(-player.z).toFixed(0)}`;
   const speed = Math.hypot(player.vx, player.vz);
   $('motion-state').textContent = paused && started ? '잠시 쉬는 중' : !player.grounded ? (player.vy > 0 ? '뛰어오르는 중' : '내려오는 중') : speed > 6 ? '달리는 중' : speed > .2 ? '걷는 중' : '가만히 서 있는 중';
+  const hp = Math.ceil(hunting.hp);
+  $('health-value').textContent = `${hp} / 100`;
+  $('health-fill').style.width = `${hp}%`; $('health-meter').setAttribute('aria-valuenow', String(hp));
+  $('health-fill').style.background = hp < 30 ? '#ed9984' : '#b3dc94';
+  $('rabbit-count').textContent = hunting.kills.rabbit; $('slime-count').textContent = hunting.kills.slime;
+  const aim = huntingView.aim();
+  const target = hunting.entities.find(e => e.id === aim.entity && e.alive);
+  $('target-info').hidden = !target || !started;
+  $('crosshair').classList.toggle('on-target', !!target);
+  if (target) { $('target-name').textContent = target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]; $('target-health').textContent = `${target.hp} / ${target.maxHp}`; }
+}
+function handleCombatEvents() {
+  for (const event of hunting.events.splice(0)) {
+    if (event.type === 'hit') {
+      hitFeedback = .18;
+      const el = document.createElement('span'); el.className = 'damage-number'; el.textContent = event.damage; $('combat-fx').appendChild(el);
+      floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .25, event.z), life: .85 });
+      huntingView.particleBurst(event);
+    } else if (event.type === 'swing') huntingView.swingEffect(event);
+    else if (['defeat', 'impact', 'spawn'].includes(event.type)) huntingView.particleBurst(event);
+    else if (event.type === 'player-defeat') { setPaused(true); $('defeat').hidden = false; $('resume').hidden = true; }
+  }
+}
+function combatFeedback(dt) {
+  if (!paused) hitFeedback = Math.max(0, hitFeedback - dt);
+  $('crosshair').classList.toggle('hit', hitFeedback > 0);
+  $('damage-flash').style.opacity = String(hunting.hurt * 2);
+  $('cooldown-fill').style.width = `${Math.max(0, 1 - hunting.cooldown / (hunting.weapon === 'bow' ? .72 : .43)) * 100}%`;
+  for (let i = floatingHits.length - 1; i >= 0; i--) {
+    const hit = floatingHits[i]; if (!paused) { hit.life -= dt; hit.position.y += dt * .8; }
+    const point = hit.position.clone().project(camera);
+    hit.el.style.left = `${(point.x + 1) * innerWidth / 2}px`; hit.el.style.top = `${(1 - point.y) * innerHeight / 2}px`;
+    hit.el.style.opacity = String(point.z > 1 ? 0 : Math.min(1, hit.life * 2));
+    if (hit.life <= 0) { hit.el.remove(); floatingHits.splice(i, 1); }
+  }
 }
 let hudTime = 0;
 function frame(milliseconds) {
@@ -213,10 +291,12 @@ function frame(milliseconds) {
   if (!paused) {
     accumulator += dt;
     while (accumulator >= 1 / 120) {
-      updateInput(1 / 120); player.update(1 / 120, input); accumulator -= 1 / 120;
+      updateInput(1 / 120); player.update(1 / 120, input); hunting.update(1 / 120, player); accumulator -= 1 / 120;
+      if (hunting.hp <= 0) break;
     }
   }
   animateAvatar(dt, time); updateCamera(dt);
+  handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); combatFeedback(dt);
   environment.clouds.forEach((cloud, i) => { cloud.position.x += dt * (.15 + i * .01); if (cloud.position.x > 110) cloud.position.x = -110; });
   environment.sunlight.position.set(player.x - 28, 42, player.z + 22);
   environment.sunlight.target.position.set(player.x, 0, player.z);
@@ -230,7 +310,7 @@ window.addEventListener('resize', () => {
 renderer.domElement.addEventListener('webglcontextlost', event => {
   event.preventDefault(); setPaused(true); loading.textContent = '그래픽 연결이 끊겼어요. 새로고침하면 다시 시작할 수 있어요.'; loading.hidden = false;
 });
-updateCamera(1, true); animateAvatar(0, 0); renderer.render(scene, camera);
+updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); renderer.render(scene, camera);
 loading.hidden = true; $('welcome').hidden = false;
 requestAnimationFrame(frame);
 
@@ -241,7 +321,8 @@ if (modelContext?.registerTool) {
   const state = () => ({
     position: { x: +player.x.toFixed(3), y: +player.y.toFixed(3), z: +player.z.toFixed(3) },
     grounded: player.grounded, view: firstPerson ? 'first' : 'third',
-    paused, started,
+    paused, started, health: Math.ceil(hunting.hp), weapon: hunting.weapon, kills: { ...hunting.kills },
+    creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,position:{x:+e.x.toFixed(2),y:+e.y.toFixed(2),z:+e.z.toFixed(2)}})),
   });
   const validateEmpty = value => {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
@@ -262,6 +343,17 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); resetPosition(); return state(); } },
+    { name: 'equip_weapon', title: '칼·활 장착', description: 'Equip the sword or bow, matching the visible weapon buttons and number keys.',
+      inputSchema: { type: 'object', properties: { weapon: { type: 'string', enum: ['sword', 'bow'] } }, required: ['weapon'], additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute(input) {
+        if (!input || !['sword', 'bow'].includes(input.weapon) || Object.keys(input).some(k => k !== 'weapon')) throw new Error('weapon must be sword or bow.');
+        equipWeapon(input.weapon); return state();
+      } },
+    { name: 'attack_with_weapon', title: '장착한 무기로 공격', description: 'Attack in the current aimed direction using the equipped weapon, matching click or F. Requires active play and a ready weapon.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute(input) { validateEmpty(input); if (!attack()) throw new Error('Start or resume play, and wait until the weapon is ready.'); return { attacked: true, weapon: hunting.weapon }; } },
   ];
   for (const tool of tools) {
     try { void Promise.resolve(modelContext.registerTool(tool, { signal: lifecycle.signal })).catch(() => {}); } catch { /* Browsers without the proposed API still play normally. */ }
