@@ -45,8 +45,12 @@ export class Movement {
     const scale = magnitude > 1 ? 1 / magnitude : 1;
     const speed = input.sprint ? 8.6 : 4.7;
     const blend = 1 - Math.exp(-(this.grounded ? 18 : 7) * dt);
-    this.vx += (input.x * scale * speed - this.vx) * blend;
-    this.vz += (input.z * scale * speed - this.vz) * blend;
+    if (input.forcedVelocity) {
+      this.vx = input.forcedVelocity.x; this.vz = input.forcedVelocity.z; this.jumpBuffer = 0;
+    } else {
+      this.vx += (input.x * scale * speed - this.vx) * blend;
+      this.vz += (input.z * scale * speed - this.vz) * blend;
+    }
     if (this.jumpBuffer > 0 && this.coyote > 0) {
       this.vy = 8.2; this.grounded = false; this.coyote = 0; this.jumpBuffer = 0;
     }

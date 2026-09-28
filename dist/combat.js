@@ -1,4 +1,5 @@
 import { terrainHeight, overlaps, WORLD_RADIUS } from './movement.js';
+import { Warrior } from './warrior.js';
 
 const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
 export function segmentSphere(a, b, center, radius) {
@@ -29,21 +30,23 @@ export class Hunting {
     this.weapon='sword';this.cooldown=0;this.swing=0;this.hp=100;this.invincible=0;
     this.drawing=false;this.charge=0;this.release=0;this.lastCharge=0;
     this.hurt=0;this.sinceHit=100;this.kills={rabbit:0,slime:0};this.time=0;this.nextArrow=1;
+    this.warrior=new Warrior(this);
     const rabbits=[[-3,2],[4,-2],[-5,-10],[10,-11],[-13,5],[12,10]];
     const slimes=[[4,-9],[-2,-17],[12,-22],[-14,-23],[20,-6]];
     for(const [kind,spots] of [['rabbit',rabbits],['slime',slimes]]) {
       spots.forEach(([x,z],i)=>this.entities.push({id:`${kind}-${i+1}`,kind,x,z,y:terrainHeight(x,z),homeX:x,homeZ:z,
         hp:kind==='rabbit'?24:72,maxHp:kind==='rabbit'?24:72,radius:kind==='rabbit'?.43:.72,height:kind==='rabbit'?.8:1.3,
         alive:true,respawn:0,heading:i*1.9,brain:1+i*.31,phase:i*2,hop:0,flash:0,windup:0,recovery:0,alert:false,moving:false,
-        knockX:0,knockZ:0,variant:i%3}));
+        knockX:0,knockZ:0,stagger:0,variant:i%3}));
     }
   }
   equip(weapon) {
-    if(!['sword','bow'].includes(weapon))throw new Error('Unknown weapon');
+    if(!['axe','sword','bow'].includes(weapon))throw new Error('Unknown weapon');
+    if(weapon!==this.weapon)this.warrior.cancel();
     this.cancelDraw();this.weapon=weapon;this.swing=0;this.release=0;
   }
   restorePlayer() {
-    this.cancelDraw();this.hp=100;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
+    this.cancelDraw();this.warrior.cancel(true);this.hp=100;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
     this.arrows.length=0;for(const e of this.entities){e.windup=0;e.recovery=Math.max(e.recovery,1);}
   }
   unobstructed(a,b) { return !this.colliders.some(box=>{const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
@@ -73,6 +76,7 @@ export class Hunting {
     this.events.push({type:'shoot',charge});return true;
   }
   attack(player,direction) {
+    if(this.weapon==='axe')return this.warrior.basicAttack(player,direction);
     if(this.weapon!=='sword'||this.hp<=0||this.cooldown>0)return false;
     const length=Math.hypot(direction.x,direction.z)||1;
     const dx=direction.x/length,dz=direction.z/length;
@@ -95,7 +99,7 @@ export class Hunting {
     if(this.hp<=0||this.invincible>0)return false;
     this.hp=Math.max(0,this.hp-amount);this.invincible=.65;this.hurt=.32;this.sinceHit=0;
     this.events.push({type:'hurt',damage:amount});
-    if(this.hp===0){this.cancelDraw();this.events.push({type:'player-defeat'});}
+    if(this.hp===0){this.cancelDraw();this.warrior.cancel();this.events.push({type:'player-defeat'});}
     return true;
   }
   moveEntity(e,dx,dz) {
@@ -111,17 +115,19 @@ export class Hunting {
     this.time+=dt;this.cooldown=Math.max(0,this.cooldown-dt);this.swing=Math.max(0,this.swing-dt);this.release=Math.max(0,this.release-dt);
     if(this.drawing)this.charge=Math.min(1,this.charge+dt/1.05);
     this.invincible=Math.max(0,this.invincible-dt);this.hurt=Math.max(0,this.hurt-dt);this.sinceHit+=dt;
+    this.warrior.update(dt,player);
     if(this.hp>0&&this.sinceHit>6)this.hp=Math.min(100,this.hp+4*dt);
     for(const e of this.entities) {
       e.flash=Math.max(0,e.flash-dt);e.recovery=Math.max(0,e.recovery-dt);
       if(!e.alive){
         e.respawn-=dt;
         if(e.respawn<=0&&Math.hypot(e.homeX-player.x,e.homeZ-player.z)>(e.kind==='slime'?9:4)) {
-          Object.assign(e,{x:e.homeX,z:e.homeZ,y:terrainHeight(e.homeX,e.homeZ),hp:e.maxHp,alive:true,windup:0,recovery:1,knockX:0,knockZ:0,hop:0});
+          Object.assign(e,{x:e.homeX,z:e.homeZ,y:terrainHeight(e.homeX,e.homeZ),hp:e.maxHp,alive:true,windup:0,recovery:1,knockX:0,knockZ:0,hop:0,stagger:0});
           this.events.push({type:'spawn',x:e.x,y:e.y,z:e.z,kind:e.kind});
         }
         continue;
       }
+      if(e.stagger>0){e.stagger=Math.max(0,e.stagger-dt);e.hop=0;e.moving=false;this.moveEntity(e,e.knockX*dt,e.knockZ*dt);e.knockX*=Math.exp(-12*dt);e.knockZ*=Math.exp(-12*dt);continue;}
       const px=player.x-e.x,pz=player.z-e.z,distance=Math.hypot(px,pz),homeDistance=Math.hypot(e.homeX-e.x,e.homeZ-e.z);
       let speed=0;e.phase+=dt*(e.kind==='rabbit'?10:6);e.brain-=dt;
       if(e.kind==='rabbit') {

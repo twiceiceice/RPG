@@ -1,0 +1,160 @@
+import * as THREE from './vendor/three.module.js';
+
+const Y = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), midpoint = new THREE.Vector3();
+const ease = t => { t = THREE.MathUtils.clamp(t, 0, 1); return t * t * (3 - 2 * t); };
+const mix = THREE.MathUtils.lerp;
+const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: .52, ...extra });
+function mesh(parent, geometry, material, x = 0, y = 0, z = 0) {
+  const object = new THREE.Mesh(geometry, material); object.position.set(x, y, z); object.castShadow = true; parent.add(object); return object;
+}
+function box(parent, size, material, x, y, z) { return mesh(parent, new THREE.BoxGeometry(...size), material, x, y, z); }
+function segment(object, a, b) {
+  v.copy(b).sub(a); object.scale.y = v.length(); object.position.copy(midpoint.copy(a).add(b).multiplyScalar(.5));
+  object.quaternion.setFromUnitVectors(Y, v.normalize());
+}
+function makeAxe() {
+  const root = new THREE.Group();
+  const steel = mat(0x779394, { metalness: .7, roughness: .28 }), edge = mat(0xdce6d8, { metalness: .7, roughness: .2 });
+  const bronze = mat(0xd7984d, { metalness: .5 }), leather = mat(0x3c3028), wood = mat(0x574238);
+  mesh(root, new THREE.CylinderGeometry(.045, .053, 1.56, 8), wood, 0, .78, 0);
+  for (let i = 0; i < 7; i++) mesh(root, new THREE.CylinderGeometry(.058, .058, .065, 8), i % 2 ? bronze : leather, 0, .18 + i * .10, 0);
+  mesh(root, new THREE.CylinderGeometry(.085, .06, .10, 8), bronze, 0, .03, 0);
+  box(root, [.20, .32, .22], bronze, 0, 1.48, 0);
+  for (const sign of [-1, 1]) {
+    const shape = new THREE.Shape();
+    [[.05,1.60],[.28,1.76],[.64,1.86],[.77,1.65],[.72,1.30],[.40,1.18],[.10,1.34]].forEach(([x,y],i)=>i?shape.lineTo(x*sign,y):shape.moveTo(x*sign,y));shape.closePath();
+    const blade = mesh(root, new THREE.ExtrudeGeometry(shape, { depth: .12, bevelEnabled: true, bevelSize: .035, bevelThickness: .022, bevelSegments: 1, steps: 1 }), steel, 0, 0, -.06);
+    const edgeShape = new THREE.Shape();
+    [[.64,1.86],[.77,1.65],[.72,1.30],[.61,1.36],[.66,1.63],[.57,1.78]].forEach(([x,y],i)=>i?edgeShape.lineTo(x*sign,y):edgeShape.moveTo(x*sign,y));edgeShape.closePath();
+    mesh(root, new THREE.ExtrudeGeometry(edgeShape, { depth: .15, bevelEnabled: false }), edge, 0, 0, -.075);
+    blade.castShadow = true;
+  }
+  const rune = mat(0xffcc75, { emissive: 0xb64b16, emissiveIntensity: .38 });
+  box(root, [.06, .14, .015], rune, 0, 1.51, .126);
+  return root;
+}
+
+export class WarriorView {
+  constructor(scene, camera, avatar, warrior) {
+    this.scene = scene; this.camera = camera; this.avatar = avatar; this.warrior = warrior; this.effects = [];
+    this.rig = new THREE.Group(); scene.add(this.rig);
+    this.axe = makeAxe(); this.rig.add(this.axe);
+    this.rotation = new THREE.Quaternion(); this.localRotation = new THREE.Quaternion(); this.euler = new THREE.Euler();
+    this.position = new THREE.Vector3(); this.handPoint = new THREE.Vector3();
+    this.blendPosition = new THREE.Vector3(); this.blendRotation = new THREE.Quaternion();
+    const metal = mat(0x354e54, { metalness: .48 }), trim = mat(0xd9a255, { metalness: .45 }), glove = mat(0x49392b);
+    this.armor = new THREE.Group(); avatar.body.add(this.armor);
+    box(this.armor, [.60,.54,.14], metal, 0, 1.23, .22);
+    box(this.armor, [.10,.45,.025], trim, 0, 1.25, .304);
+    for (const side of [-1,1]) {
+      box(this.armor, [.31,.19,.37], metal, side*.38, 1.48, 0);
+      box(this.armor, [.33,.055,.39], trim, side*.38, 1.57, 0);
+    }
+    this.arms = [-1,1].map(side => ({ side,
+      upper: box(this.rig,[.21,1,.22],metal,0,0,0), fore: box(this.rig,[.18,1,.19],glove,0,0,0),
+      hand: box(this.rig,[.17,.16,.18],glove,0,0,0), shoulder:new THREE.Vector3(), elbow:new THREE.Vector3(), end:new THREE.Vector3(),
+    }));
+    this.firstRig = new THREE.Group(); camera.add(this.firstRig);
+    this.firstAxe = this.axe.clone(); this.firstRig.add(this.firstAxe);
+    for (const y of [.35,.72]) box(this.firstAxe,[.16,.16,.17],glove,0,y,0);
+    this.firstBoots = [-1,1].map(side=>box(this.firstRig,[.19,.23,.40],glove,side*.15,-.68,-.72));
+    this.ringGeometry = new THREE.RingGeometry(.90,1,56);
+    this.arcGeometry = new THREE.RingGeometry(.86,1,40,1,-1.40,2.80);
+    this.rig.visible = this.firstRig.visible = this.armor.visible = false;
+  }
+  placeLocal(player, dx, dz, x, y, z, rx, ry, rz) {
+    const angle = Math.atan2(dx,dz); this.rotation.setFromAxisAngle(Y,angle);
+    this.axe.position.set(x,y,z).applyQuaternion(this.rotation).add(this.position.set(player.x,player.y,player.z));
+    this.localRotation.setFromEuler(this.euler.set(rx,ry,rz)); this.axe.quaternion.copy(this.rotation).multiply(this.localRotation);
+  }
+  placePlanted(anchor, lift = 0) {
+    this.placeLocal({x:anchor.x,y:anchor.y,z:anchor.z},anchor.dx,anchor.dz,0,1.64+lift,-.30,Math.PI-.18,0,0);
+  }
+  update(dt, firstPerson, player, paused) {
+    const w = this.warrior, avatar = this.avatar, equipped = w.combat.weapon === 'axe';
+    this.armor.visible = equipped; this.rig.visible = equipped && !firstPerson; this.firstRig.visible = equipped && firstPerson;
+    if (equipped) {
+      avatar.arms.forEach(arm=>{arm.visible=false;});
+      const a = w.active, id = a?.id, t = a ? a.elapsed/a.duration : 0;
+      const angle = avatar.root.rotation.y, dx = a?.dx ?? w.planted?.dx ?? Math.sin(angle), dz = a?.dz ?? w.planted?.dz ?? Math.cos(angle);
+      const idle = () => this.placeLocal(player,dx,dz,-.20,.64,.30,.17,0,-.42);
+      idle();
+      let flight = 0;
+      if (id === 'charge') {
+        avatar.body.rotation.x = .20; avatar.legs.forEach((leg,i)=>{leg.rotation.x=Math.sin(t*22+i*Math.PI)*.8;});
+        this.placeLocal(player,dx,dz,-.35,.72,.2,-.3,0,-.70);
+      } else if (id === 'slam') {
+        const wind = ease(t/.35), strike = ease((t-.35)/.22);
+        if (t < .56) this.placeLocal(player,dx,dz,mix(-.2,0,wind),mix(.64,1.64,wind),mix(.3,-.32,wind)+strike*1.08,mix(.17,-.65,wind)+strike*(Math.PI+.47),0,mix(-.42,0,wind));
+        else if (a.anchor) this.placePlanted(a.anchor);
+        avatar.body.position.y -= strike*.13; avatar.body.rotation.x = -.10*wind+.28*strike;
+        avatar.legs.forEach(leg=>{leg.rotation.x=-.16*strike;});
+      } else if (id === 'kick') {
+        this.placePlanted(a.anchor);
+        flight = Math.pow(Math.sin(t*Math.PI),.8);
+        avatar.body.position.y = .66*flight;
+        avatar.body.position.x = -.10*flight; avatar.body.position.z = .24*flight;
+        avatar.body.rotation.x = -.12*flight; avatar.body.rotation.z = -.16*flight;
+        avatar.legs[0].rotation.x = -1.35*flight; avatar.legs[1].rotation.x = -1.48*flight;
+        avatar.legs[0].rotation.z = .10*flight; avatar.legs[1].rotation.z = -.10*flight;
+      } else if (id === 'sweep') {
+        if (t < .23) this.placePlanted(a.anchor,ease(t/.23)*.50);
+        else {
+          const swing = ease((t-.23)/.45), recover = ease((t-.73)/.27);
+          this.placeLocal(player,dx,dz,mix(0,-.2,recover),mix(1.0,.64,recover),mix(.24,.30,recover),mix(Math.PI/2,.17,recover),mix(-1.35+swing*2.85,0,recover),mix(0,-.42,recover));
+          if (t < .39) {
+            this.blendPosition.copy(this.axe.position); this.blendRotation.copy(this.axe.quaternion);
+            this.placePlanted(a.anchor,.50);
+            const release=ease((t-.23)/.16);this.axe.position.lerp(this.blendPosition,release);this.axe.quaternion.slerp(this.blendRotation,release);
+          }
+          avatar.body.rotation.y = Math.sin(swing*Math.PI)*.34; avatar.body.rotation.z = -.12*Math.sin(swing*Math.PI);
+        }
+      } else if (id === 'slash') {
+        const swing = Math.sin(t*Math.PI), arc = -1.2+ease(t)*2.4;
+        this.placeLocal(player,dx,dz,-.15,.70+swing*.30,.30,mix(.17,1.40,swing),arc*swing,mix(-.42,0,swing));
+      } else if (w.planted) {
+        this.placePlanted(w.planted); avatar.body.rotation.x = .15; avatar.body.position.y = -.10;
+      }
+      avatar.root.updateMatrixWorld(true); this.axe.updateMatrixWorld(true);
+      for (const arm of this.arms) {
+        arm.shoulder.set(arm.side*.38,1.42,0); avatar.body.localToWorld(arm.shoulder);
+        const restingGrip=arm.side<0?.72:.35;
+        const grip = id === 'kick' ? mix(restingGrip,arm.side<0?.10:.30,ease(t/.18)*(1-ease((t-.82)/.18))) : restingGrip;
+        arm.end.set(0,grip,0); this.axe.localToWorld(arm.end);
+        arm.elbow.copy(arm.shoulder).lerp(arm.end,.48);
+        arm.elbow.x += arm.side*.18*Math.cos(angle); arm.elbow.z -= arm.side*.18*Math.sin(angle); arm.elbow.y -= .10;
+        segment(arm.upper,arm.shoulder,arm.elbow); segment(arm.fore,arm.elbow,arm.end);
+        arm.hand.position.copy(arm.end); arm.hand.quaternion.copy(this.axe.quaternion);
+      }
+      this.firstAxe.scale.setScalar(.67); this.firstAxe.position.set(.22,-.69,-1.18); this.firstAxe.rotation.set(.16,0,-.30);
+      if (id === 'slam') {
+        const wind=ease(t/.35),strike=ease((t-.35)/.22);
+        this.firstAxe.position.set(.22*(1-wind),-.69+wind*.36-strike*.08,-1.18);
+        this.firstAxe.rotation.set(-.65*wind+strike*(Math.PI+.47),0,-.30*(1-wind));
+      } else if (w.planted || id === 'kick' || (id==='sweep'&&t<.23)) {
+        this.firstAxe.position.set(-.06,-.17,-1.0); this.firstAxe.rotation.set(Math.PI-.18,0,0);
+      }
+      if (id === 'sweep' || id === 'slash') {
+        const swing = Math.sin(t*Math.PI);
+        this.firstAxe.position.x=.22-swing*.3;this.firstAxe.rotation.set(.16+swing*1.15,-1.0+ease(t)*2.0,-.30+swing*.2);
+      }
+      this.firstBoots.forEach((boot,i)=>{boot.visible=id==='kick';boot.position.set((i?1:-1)*.20,-.70+flight*.64,-.68-flight*.40);boot.rotation.x=-flight*.45;});
+    }
+    for (const e of this.effects) {
+      if (!paused) e.life -= dt;
+      const p=1-Math.max(0,e.life/e.total);e.object.scale.setScalar(e.radius*(.28+p*.72));
+      e.object.material.opacity=(1-p)*.8;
+      if(e.life<=0){this.scene.remove(e.object);e.object.material.dispose();}
+    }
+    this.effects=this.effects.filter(e=>e.life>0);
+  }
+  effect(event) {
+    const sweep=['sweep','slash'].includes(event.skill);
+    const material=new THREE.MeshBasicMaterial({color:event.skill==='kick'?0xf8efd0:0xffbd62,transparent:true,opacity:.8,side:THREE.DoubleSide,depthWrite:false});
+    const object=new THREE.Mesh(sweep?this.arcGeometry:this.ringGeometry,material);
+    object.rotation.x=-Math.PI/2; object.rotation.z=Math.atan2(-event.dz,event.dx);
+    object.position.set(event.x,event.y+(sweep?.85:event.skill==='kick'?.7:.055),event.z);
+    this.scene.add(object);
+    this.effects.push({object,life:sweep?.34:.48,total:sweep?.34:.48,radius:event.skill==='slam'?2.35:event.skill==='sweep'?3.6:event.skill==='kick'?1.1:1.8});
+  }
+}

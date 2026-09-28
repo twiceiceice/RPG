@@ -3,6 +3,8 @@ import { Movement } from './movement.js';
 import { createEnvironment, createAvatar } from './environment.js';
 import { Hunting } from './combat.js';
 import { HuntingView } from './hunting-view.js';
+import { WARRIOR_SKILLS } from './warrior.js';
+import { WarriorView } from './warrior-view.js';
 
 const $ = id => document.getElementById(id);
 const world = $('world'), loading = $('loading');
@@ -27,6 +29,8 @@ const avatar = createAvatar(scene);
 const player = new Movement(environment.colliders);
 const hunting = new Hunting(environment.colliders);
 const huntingView = new HuntingView(scene, camera, avatar, hunting, environment);
+const warrior = hunting.warrior;
+const warriorView = new WarriorView(scene, camera, avatar, warrior);
 const coarsePointer = matchMedia('(pointer:coarse)').matches;
 const keys = new Set();
 let started = false, paused = true, locked = false, firstPerson = false;
@@ -38,12 +42,14 @@ const raycaster = new THREE.Raycaster();
 const input = { x: 0, z: 0, sprint: false };
 const floatingHits = [];
 let hitFeedback = 0;
+let cameraShake = 0;
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function notify(message) {
   $('toast').textContent = message; $('toast').hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3600);
 }
-function clearInput() { cancelBowDraw(); keys.clear(); touchX = touchZ = 0; dragging = null; $('stick').style.transform = ''; }
+function clearInput() { cancelBowDraw(); warrior.queued = null; keys.clear(); touchX = touchZ = 0; dragging = null; $('stick').style.transform = ''; }
 function capturePointer(element, pointerId) {
   // Embedded browsers can reject capture while pointer lock is changing.
   try { element.setPointerCapture(pointerId); } catch { /* Dragging still works inside the play area. */ }
@@ -59,7 +65,7 @@ async function lockMouse() {
     if (!renderer.domElement.requestPointerLock) throw new Error('unsupported');
     await renderer.domElement.requestPointerLock();
   } catch {
-    notify('우클릭 드래그로 시점 회전 · 활은 좌클릭을 누르고 있다 놓아 쏘세요.');
+    notify('우클릭 드래그로 시점 회전 · 1~4 전사 기술 · 좌클릭 기본 공격');
   }
 }
 function play() {
@@ -85,15 +91,18 @@ function resetPosition() {
 }
 function equipWeapon(weapon) {
   cancelBowDraw();
+  if (warrior.active && weapon !== hunting.weapon) player.vx = player.vz = 0;
   hunting.equip(weapon);
-  const bow = weapon === 'bow';
-  for (const [id, selected] of [['sword-button', !bow], ['bow-button', bow]]) {
+  document.body.dataset.weapon = weapon;
+  const bow = weapon === 'bow', axe = weapon === 'axe';
+  for (const [id, selected] of [['axe-button', axe], ['sword-button', weapon === 'sword'], ['bow-button', bow]]) {
     $(id).classList.toggle('selected', selected); $(id).setAttribute('aria-pressed', String(selected));
   }
-  $('weapon-name').textContent = bow ? '들판의 활' : '여행자의 칼';
-  $('weapon-hint').textContent = bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '클릭 / F · 가까이서 베기';
+  $('weapon-name').textContent = axe ? '양손 도끼' : bow ? '들판의 활' : '여행자의 칼';
+  $('weapon-hint').textContent = axe ? '좌클릭 / F 기본 공격 · 1~4 기술' : bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '클릭 / F · 가까이서 베기';
+  $('warrior-hud').hidden = !axe;
   $('touch-attack').textContent = bow ? '당기기' : '공격';
-  $('touch-attack').setAttribute('aria-label', bow ? '누르고 활 당기기, 놓으면 발사' : '칼로 공격');
+  $('touch-attack').setAttribute('aria-label', bow ? '누르고 활 당기기, 놓으면 발사' : axe ? '도끼 기본 공격' : '칼로 공격');
   if (bow && pitch > .10) pitch = .08;
   updateCamera(1, true); world.focus({ preventScroll: true });
 }
@@ -102,7 +111,15 @@ function attack() {
   const aim = huntingView.aim();
   const attacked = hunting.attack(player, { x: -Math.sin(yaw), y: aim.direction.y, z: -Math.cos(yaw) }, aim.point);
   if (attacked) avatar.root.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
+  else if (hunting.weapon === 'axe' && warrior.planted && !warrior.active) notify('3번 비룡각 또는 4번 열풍참으로 이어 가세요.');
   return attacked;
+}
+function useWarriorSkill(skill, showHint = true) {
+  const result = !started || paused ? { accepted: false, reason: '플레이를 시작하거나 이어 가세요.' }
+    : warrior.request(skill, player, { x: -Math.sin(yaw), z: -Math.cos(yaw) });
+  if (!result.accepted && showHint) notify(result.reason);
+  if (result.accepted) updateWarriorHUD();
+  return result;
 }
 function beginBowDraw(owner) {
   if (!started || paused || drawOwner || !hunting.beginDraw()) return false;
@@ -126,6 +143,8 @@ function releaseBowDraw(owner) {
 }
 $('sword-button').addEventListener('click', () => equipWeapon('sword'));
 $('bow-button').addEventListener('click', () => equipWeapon('bow'));
+$('axe-button').addEventListener('click', () => equipWeapon('axe'));
+for (const skill of WARRIOR_SKILLS) $('skill-' + skill.id).addEventListener('click', () => { useWarriorSkill(skill.id); world.focus({ preventScroll: true }); });
 $('revive-button').addEventListener('click', () => { resetPosition(); play(); });
 $('play-button').addEventListener('click', play);
 $('resume-button').addEventListener('click', play);
@@ -142,7 +161,7 @@ document.addEventListener('pointerlockchange', () => {
   if (wasLocked && !locked) setPaused(true);
 });
 document.addEventListener('pointerlockerror', () => {
-  if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · F 공격');
+  if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~4 전사 기술');
 });
 document.addEventListener('keydown', event => {
   if ($('help-dialog').open) return;
@@ -152,9 +171,12 @@ document.addEventListener('keydown', event => {
   if (event.repeat) return;
   if (event.code === 'KeyV') setView(firstPerson ? 'third' : 'first');
   if (event.code === 'KeyR') resetPosition();
-  if (event.code === 'Digit1') equipWeapon('sword');
-  if (event.code === 'Digit2') equipWeapon('bow');
+  if (event.code === 'KeyZ') equipWeapon('axe');
+  if (event.code === 'KeyX') equipWeapon('sword');
+  if (event.code === 'KeyC') equipWeapon('bow');
   if (!started || paused) return;
+  const skill = WARRIOR_SKILLS.find(s => event.code === 'Digit' + s.key);
+  if (skill) { event.preventDefault(); useWarriorSkill(skill.id); return; }
   keys.add(event.code);
   if (event.code === 'Space') player.jump();
   if (event.code === 'KeyF') { if (hunting.weapon === 'bow') beginBowDraw('keyboard'); else attack(); }
@@ -261,6 +283,7 @@ function updateInput(dt) {
   input.x = sideways * Math.cos(yaw) - forward * Math.sin(yaw);
   input.z = -sideways * Math.sin(yaw) - forward * Math.cos(yaw);
   input.sprint = touchSprint || keys.has('ShiftLeft') || keys.has('ShiftRight');
+  warrior.movement(input, player);
 }
 function safeCameraPosition(target, candidate) {
   offset.copy(candidate).sub(target);
@@ -273,8 +296,9 @@ function safeCameraPosition(target, candidate) {
 }
 function updateCamera(dt, immediate = false) {
   if (firstPerson) {
-    camera.position.set(player.x, player.y + 1.76, player.z);
-    desired.set(player.x - Math.sin(yaw) * Math.cos(pitch), player.y + 1.76 - Math.sin(pitch), player.z - Math.cos(yaw) * Math.cos(pitch));
+    const a = warrior.active, lift = a?.id === 'kick' ? Math.sin(a.elapsed/a.duration*Math.PI)*.34 : 0;
+    camera.position.set(player.x, player.y + 1.76 + lift, player.z);
+    desired.set(player.x - Math.sin(yaw) * Math.cos(pitch), player.y + 1.76 + lift - Math.sin(pitch), player.z - Math.cos(yaw) * Math.cos(pitch));
     camera.lookAt(desired); return;
   }
   focus.set(player.x, player.y + 1.22, player.z);
@@ -291,7 +315,11 @@ function updateCamera(dt, immediate = false) {
 function animateAvatar(dt, time) {
   const speed = Math.hypot(player.vx, player.vz);
   avatar.root.position.set(player.x, player.y, player.z);
-  if (hunting.weapon === 'bow' || hunting.swing > 0) {
+  avatar.body.position.x = avatar.body.position.z = 0; avatar.body.rotation.x = avatar.body.rotation.y = 0;
+  avatar.legs.forEach(leg => { leg.rotation.z = 0; });
+  if (warrior.active || warrior.planted) {
+    const facing = warrior.active ?? warrior.planted; avatar.root.rotation.y = Math.atan2(facing.dx, facing.dz);
+  } else if (hunting.weapon === 'bow' || hunting.swing > 0) {
     avatar.root.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
   } else if (speed > .15) {
     const angle = Math.atan2(player.vx, player.vz);
@@ -304,6 +332,33 @@ function animateAvatar(dt, time) {
   avatar.body.rotation.z = player.grounded ? Math.sin(phase * .5) * .02 * stride : 0;
   avatar.legs.forEach((leg, i) => { leg.rotation.x = player.grounded ? Math.sin(phase + i * Math.PI) * stride : (i === 0 ? -.5 : .3); });
   avatar.arms.forEach((arm, i) => { arm.rotation.x = player.grounded ? -Math.sin(phase + i * Math.PI) * stride * .7 : -.75; arm.rotation.z = (i === 0 ? 1 : -1) * (.05 + Math.sin(time * 1.6) * .025); });
+}
+function updateWarriorHUD() {
+  const a = warrior.active;
+  const progress = a ? a.elapsed / a.duration : 0;
+  const phaseLabels = {
+    charge: '돌파', slam: progress < .35 ? '들어올리기' : progress < .56 ? '내려찍기' : '도끼 고정',
+    kick: progress < .38 ? '도약' : progress < .68 ? '발차기' : '착지',
+    sweep: progress < .23 ? '뽑기' : progress < .73 ? '가로 베기' : '마무리',
+  };
+  for (const skill of WARRIOR_SKILLS) {
+    const button = $('skill-' + skill.id), remaining = warrior.cooldowns[skill.id];
+    const needsAxe = ['kick','sweep'].includes(skill.id) && !warrior.planted;
+    const usedKick = skill.id === 'kick' && warrior.planted?.kicked;
+    const recoverFirst = ['charge','slam'].includes(skill.id) && warrior.planted;
+    const active = a?.id === skill.id, queued = warrior.queued?.id === skill.id;
+    button.classList.toggle('active', active); button.classList.toggle('queued', queued);
+    button.classList.toggle('unavailable', remaining > 0 || needsAxe || usedKick || recoverFirst);
+    button.style.setProperty('--cooldown', `${remaining / skill.cooldown * 100}%`);
+    $('skill-state-' + skill.id).textContent = active ? phaseLabels[skill.id] : queued ? '다음 동작' : remaining > 0 ? `${remaining.toFixed(1)}초` : usedKick ? '4번으로 마무리' : recoverFirst ? '도끼 회수 후' : needsAxe ? '천붕격 후' : '준비';
+  }
+  const name = WARRIOR_SKILLS.find(s => s.id === a?.id)?.name;
+  $('combo-title').textContent = name ?? (a?.id === 'slash' ? '기본 베기' : warrior.planted ? '도끼가 박혔어요' : '양손 도끼 전사');
+  $('combo-hint').textContent = warrior.queued ? `${WARRIOR_SKILLS.find(s=>s.id===warrior.queued.id).name} 예약됨`
+    : a ? { charge: '2 천붕격을 미리 눌러 이어 가세요', slam: '3 비룡각 또는 4 열풍참으로 연계', kick: '4 열풍참을 미리 눌러 마무리', sweep: '도끼를 뽑으며 전방을 크게 베기', slash: '기본 공격 중' }[a.id]
+    : warrior.planted ? `${warrior.planted.kicked ? '4 열풍참' : '3 비룡각 → 4 열풍참'} · ${warrior.planted.remaining.toFixed(1)}초 안에 연계`
+    : '1 돌진 → 2 천붕격 → 3 비룡각 → 4 열풍참';
+  $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / 3.4 * 100 : 0}%`;
 }
 function updateHUD() {
   $('coordinates').textContent = `${player.x.toFixed(0)} / ${(-player.z).toFixed(0)}`;
@@ -319,6 +374,7 @@ function updateHUD() {
   $('target-info').hidden = !target || !started;
   $('crosshair').classList.toggle('on-target', !!target);
   if (target) { $('target-name').textContent = target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]; $('target-health').textContent = `${target.hp} / ${target.maxHp}`; }
+  updateWarriorHUD();
 }
 function handleCombatEvents() {
   for (const event of hunting.events.splice(0)) {
@@ -327,6 +383,9 @@ function handleCombatEvents() {
       const el = document.createElement('span'); el.className = 'damage-number'; el.textContent = event.damage; $('combat-fx').appendChild(el);
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .25, event.z), life: .85 });
       huntingView.particleBurst(event);
+    } else if (event.type === 'warrior-impact') {
+      warriorView.effect(event); huntingView.particleBurst({ ...event, y: event.y + .2, kind: 'impact' });
+      if (!reduceMotion) cameraShake = event.skill === 'slam' ? .065 : .032;
     } else if (event.type === 'swing') huntingView.swingEffect(event);
     else if (['defeat', 'impact', 'spawn'].includes(event.type)) huntingView.particleBurst(event);
     else if (event.type === 'player-defeat') { setPaused(true); $('defeat').hidden = false; $('resume').hidden = true; }
@@ -336,7 +395,7 @@ function combatFeedback(dt) {
   if (!paused) hitFeedback = Math.max(0, hitFeedback - dt);
   $('crosshair').classList.toggle('hit', hitFeedback > 0);
   $('damage-flash').style.opacity = String(hunting.hurt * 2);
-  $('cooldown-fill').style.width = `${Math.max(0, 1 - hunting.cooldown / (hunting.weapon === 'bow' ? .45 : .43)) * 100}%`;
+  $('cooldown-fill').style.width = `${Math.max(0, 1 - hunting.cooldown / (hunting.weapon === 'bow' ? .45 : hunting.weapon === 'axe' ? .62 : .43)) * 100}%`;
   const charge = Math.round(hunting.charge * 100);
   $('bow-charge').hidden = !hunting.drawing || paused;
   $('bow-charge').classList.toggle('ready', charge === 100);
@@ -364,7 +423,8 @@ function frame(milliseconds) {
     }
   }
   animateAvatar(dt, time); updateCamera(dt);
-  handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); combatFeedback(dt);
+  handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); warriorView.update(dt, firstPerson, player, paused); combatFeedback(dt);
+  if (!paused) { cameraShake *= Math.exp(-18 * dt); camera.position.x += Math.sin(time * 61) * cameraShake; camera.position.y += Math.cos(time * 47) * cameraShake * .65; }
   environment.clouds.forEach((cloud, i) => { cloud.position.x += dt * (.15 + i * .01); if (cloud.position.x > 110) cloud.position.x = -110; });
   environment.sunlight.position.set(player.x - 28, 42, player.z + 22);
   environment.sunlight.target.position.set(player.x, 0, player.z);
@@ -378,7 +438,7 @@ window.addEventListener('resize', () => {
 renderer.domElement.addEventListener('webglcontextlost', event => {
   event.preventDefault(); setPaused(true); loading.textContent = '그래픽 연결이 끊겼어요. 새로고침하면 다시 시작할 수 있어요.'; loading.hidden = false;
 });
-updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); renderer.render(scene, camera);
+equipWeapon('axe'); updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true); renderer.render(scene, camera);
 loading.hidden = true; $('welcome').hidden = false;
 requestAnimationFrame(frame);
 
@@ -391,6 +451,7 @@ if (modelContext?.registerTool) {
     grounded: player.grounded, view: firstPerson ? 'first' : 'third',
     paused, started, health: Math.ceil(hunting.hp), weapon: hunting.weapon, kills: { ...hunting.kills },
     bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
+    warrior: warrior.state(),
     creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,position:{x:+e.x.toFixed(2),y:+e.y.toFixed(2),z:+e.z.toFixed(2)}})),
   });
   const validateEmpty = value => {
@@ -412,17 +473,24 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); resetPosition(); return state(); } },
-    { name: 'equip_weapon', title: '칼·활 장착', description: 'Equip the sword or bow, matching the visible weapon buttons and number keys.',
-      inputSchema: { type: 'object', properties: { weapon: { type: 'string', enum: ['sword', 'bow'] } }, required: ['weapon'], additionalProperties: false },
+    { name: 'equip_weapon', title: '도끼·칼·활 장착', description: 'Equip the two-handed axe, sword or bow, matching Z, X, C and the visible weapon buttons. Switching cancels a planted axe and any active skill.',
+      inputSchema: { type: 'object', properties: { weapon: { type: 'string', enum: ['axe', 'sword', 'bow'] } }, required: ['weapon'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {
-        if (!input || !['sword', 'bow'].includes(input.weapon) || Object.keys(input).some(k => k !== 'weapon')) throw new Error('weapon must be sword or bow.');
+        if (!input || !['axe', 'sword', 'bow'].includes(input.weapon) || Object.keys(input).some(k => k !== 'weapon')) throw new Error('weapon must be axe, sword or bow.');
         equipWeapon(input.weapon); return state();
       } },
-    { name: 'attack_with_weapon', title: '칼로 공격', description: 'Swing the equipped sword, matching click or F. For a bow use begin_bow_draw then release_bow_draw. Requires active play and a ready weapon.',
+    { name: 'attack_with_weapon', title: '기본 근접 공격', description: 'Swing the equipped axe or sword, matching click or F. For a bow use begin_bow_draw then release_bow_draw. Requires active play and a ready weapon.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
-      execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip the sword, start or resume play, and wait until it is ready. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
+      execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip a ready axe or sword and resume play. Recover a planted axe with skill 4. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
+    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill, matching keys 1 charge, 2 slam, 3 kick, 4 sweep. Kick and sweep require the axe planted by slam. One valid follow-up can be queued during the current skill. Returns acceptance and actual state; animation and impact advance in real time.',
+      inputSchema: { type: 'object', properties: { skill: { type: 'string', enum: ['charge','slam','kick','sweep'] } }, required: ['skill'], additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute(input) {
+        if (!input || !WARRIOR_SKILLS.some(s=>s.id===input.skill) || Object.keys(input).some(k=>k!=='skill')) throw new Error('skill must be charge, slam, kick or sweep.');
+        const result = useWarriorSkill(input.skill, false); if (!result.accepted) throw new Error(result.reason); return { ...result, ...state() };
+      } },
     { name: 'begin_bow_draw', title: '활 당기기', description: 'Begin holding the equipped bow, matching left mouse down or F down. Hold up to 1.05 seconds for full power. Does not fire until release_bow_draw.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },

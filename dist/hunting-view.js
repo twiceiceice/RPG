@@ -159,8 +159,8 @@ export class HuntingView{
     }
     this.effects=this.effects.filter(e=>e.life>0);
     const bow=this.hunting.weapon==='bow';
-    this.heldSword.visible=!bow;this.heldBow.visible=this.bowRig.visible=bow;this.firstRig.visible=firstPerson;
-    this.firstSword.visible=!bow;this.firstBow.visible=bow;
+    this.heldSword.visible=this.hunting.weapon==='sword';this.heldBow.visible=this.bowRig.visible=bow;this.firstRig.visible=firstPerson;
+    this.firstSword.visible=this.hunting.weapon==='sword';this.firstBow.visible=bow;
     avatar.arms.forEach(arm=>{arm.visible=!bow;});
     const swing=this.hunting.swing>0?Math.sin((1-this.hunting.swing/.34)*Math.PI):0;
     if(!bow&&swing>0){avatar.arms[1].rotation.x=-1.4+swing*1.8;avatar.arms[1].rotation.z=-.2-swing*.8;}
