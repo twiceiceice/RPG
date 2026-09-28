@@ -10,7 +10,7 @@
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <main id="world" tabindex="0" aria-label="3D 사냥 들판. WASD 이동, Space 점프, 1 칼, 2 활, 클릭 또는 F 공격, V 시점 전환."></main>
+  <main id="world" tabindex="0" aria-label="3D 사냥 들판. WASD 이동, Space 점프, 1 칼, 2 활. 활은 좌클릭 또는 F를 누르고 당긴 뒤 놓으면 발사. V 시점 전환."></main>
   <header class="hud top">
     <div class="identity"><span class="mark" aria-hidden="true">△</span><div><h1>바람의 들판</h1><p>작은 사냥</p></div></div>
     <nav class="actions" aria-label="게임 조작">
@@ -26,6 +26,7 @@
   </section>
   <div id="target-info" hidden><span id="target-name"></span><span id="target-health"></span></div>
   <div id="crosshair" aria-hidden="true" hidden></div>
+  <div id="bow-charge" hidden><div id="charge-meter" class="charge-track" role="progressbar" aria-label="활 당긴 정도" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="charge-fill"></span></div><span id="charge-label">당기는 중 · 놓으면 발사</span></div>
   <div id="damage-flash" aria-hidden="true"></div><div id="combat-fx" aria-hidden="true"></div>
   <div id="loading" role="status">들판을 불러오는 중…</div>
   <section id="welcome" class="welcome" hidden aria-label="플레이 시작">
@@ -33,7 +34,7 @@
     <h2>작은 사냥을 떠나요.</h2>
     <p>달아나는 토끼, 다가오는 슬라임.<br>칼과 활을 바꿔 가며 들판을 누벼 보세요.</p>
     <button id="play-button" class="primary">사냥 시작 <span aria-hidden="true">↗</span></button>
-    <small>1 칼 · 2 활 · 클릭 또는 F 공격</small>
+    <small>1 칼 · 2 활 · 활은 꾹 당긴 뒤 놓아 쏘기</small>
   </section>
   <div id="resume" class="resume" hidden><button id="resume-button">계속 걷기 <kbd>클릭</kbd></button></div>
   <div id="toast" role="status" hidden></div>
@@ -57,7 +58,7 @@
   <dialog id="help-dialog" aria-labelledby="help-title">
     <div class="dialog-heading"><h2 id="help-title">들판에서 살아남기</h2><button id="close-help" class="icon-button" aria-label="조작법 닫기">×</button></div>
     <dl><div><dt>이동</dt><dd>W A S D / 방향키</dd></div><div><dt>시점 회전</dt><dd>우클릭 드래그 / Q E</dd></div><div><dt>칼 / 활</dt><dd>1 / 2</dd></div><div><dt>공격</dt><dd>좌클릭 / F</dd></div><div><dt>달리기 / 점프</dt><dd>Shift / Space</dd></div><div><dt>1·3인칭 전환</dt><dd>V</dd></div><div><dt>카메라 거리</dt><dd>마우스 휠</dd></div><div><dt>위치·체력 회복</dt><dd>R</dd></div><div><dt>쉬기 / 마우스 해제</dt><dd>Esc</dd></div></dl>
-    <p>활은 화면 중앙으로 조준해요. 화살은 무제한이에요.<br>슬라임은 가까워지면 공격해요. 6초 동안 맞지 않으면 체력이 회복돼요. 사냥한 대상은 잠시 뒤 다시 나타나요.<br>터치: 왼쪽 패드 이동 · 오른쪽 화면 시점 · 공격 버튼</p>
+    <p>활은 좌클릭 또는 F를 누르고 당긴 뒤, 놓으면 발사해요. 약 1초간 가득 당기면 더 빠르고 강하게 날아가요. 당기는 동안에도 화면 중앙으로 조준할 수 있고, 화살은 무제한이에요. 무기 변경이나 일시정지로 당기기를 취소할 수 있어요.<br>슬라임은 가까워지면 공격해요. 6초 동안 맞지 않으면 체력이 회복돼요. 사냥한 대상은 잠시 뒤 다시 나타나요.<br>터치: 왼쪽 패드 이동 · 오른쪽 화면 시점 · 당기기 버튼을 누르고 있다 놓아 발사</p>
   </dialog>
   <script type="module" src="./game.js"></script>
   <noscript>이 놀이터를 실행하려면 JavaScript를 켜 주세요.</noscript>

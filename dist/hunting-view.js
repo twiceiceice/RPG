@@ -2,6 +2,12 @@ import * as THREE from './vendor/three.module.js';
 
 const material=(color,extra={})=>new THREE.MeshStandardMaterial({color,roughness:.8,...extra});
 const unitY=new THREE.Vector3(0,1,0);
+const segmentDirection=new THREE.Vector3(),segmentCenter=new THREE.Vector3();
+function setSegment(mesh,from,to){
+  segmentDirection.copy(to).sub(from);mesh.scale.y=segmentDirection.length();
+  mesh.position.copy(segmentCenter.copy(from).add(to).multiplyScalar(.5));
+  mesh.quaternion.setFromUnitVectors(unitY,segmentDirection.normalize());
+}
 function add(parent,geometry,mat,x=0,y=0,z=0){const m=new THREE.Mesh(geometry,mat);m.position.set(x,y,z);m.castShadow=true;parent.add(m);return m;}
 function box(parent,size,mat,x,y,z){return add(parent,new THREE.BoxGeometry(...size),mat,x,y,z);}
 function sphere(parent,r,mat,x,y,z){return add(parent,new THREE.SphereGeometry(r,12,8),mat,x,y,z);}
@@ -15,14 +21,28 @@ export function makeSword(){
   sphere(g,.063,gold,0,.17,0);
   return g;
 }
-export function makeBow(){
+export function makeBow(skin=material(0xd6ae8a)){
   const g=new THREE.Group(),wood=material(0x95613e),binding=material(0xe1bd6c);
-  const curve=new THREE.CatmullRomCurve3([new THREE.Vector3(0,-.64,0),new THREE.Vector3(.26,-.32,0),new THREE.Vector3(.32,0,0),new THREE.Vector3(.26,.32,0),new THREE.Vector3(0,.64,0)]);
-  add(g,new THREE.TubeGeometry(curve,20,.042,6,false),wood);
-  box(g,[.10,.23,.08],binding,.32,0,0);
-  add(g,new THREE.CylinderGeometry(.007,.007,1.28,4),material(0xe9e6cf));
+  const curve=new THREE.CatmullRomCurve3([new THREE.Vector3(0,-.64,0),new THREE.Vector3(-.26,-.32,0),new THREE.Vector3(-.32,0,0),new THREE.Vector3(-.26,.32,0),new THREE.Vector3(0,.64,0)]);
+  const limbs=add(g,new THREE.TubeGeometry(curve,20,.042,6,false),wood);
+  box(g,[.10,.23,.08],binding,-.32,0,0);
+  box(g,[.15,.16,.15],skin,-.32,-.07,0);
+  const stringMaterial=material(0xfff3ce),stringGeometry=new THREE.CylinderGeometry(.009,.009,1,5);
+  const strings=[add(g,stringGeometry,stringMaterial),add(g,stringGeometry,stringMaterial)];
+  const arrow=makeArrow();arrow.quaternion.setFromUnitVectors(unitY,new THREE.Vector3(-1,0,0));g.add(arrow);
+  const hand=box(g,[.14,.15,.17],skin,0,-.05,.04);
+  g.userData={limbs,strings,arrow,hand,nock:new THREE.Vector3(),tips:[new THREE.Vector3(),new THREE.Vector3()]};
+  poseBow(g,0,true);
   g.rotation.y=-Math.PI/2;
   return g;
+}
+function poseBow(bow,pull,loaded){
+  const {limbs,strings,arrow,hand,nock,tips}=bow.userData;
+  limbs.scale.y=1-.06*pull;nock.set(.52*pull,0,0);
+  tips[0].set(0,-.64*limbs.scale.y,0);tips[1].set(0,.64*limbs.scale.y,0);
+  strings.forEach((string,i)=>setSegment(string,tips[i],nock));
+  arrow.position.set(nock.x-.36,0,0);arrow.visible=loaded;
+  hand.position.set(nock.x,-.05,.04);
 }
 function makeArrow(){
   const g=new THREE.Group();
@@ -76,12 +96,17 @@ export class HuntingView{
       this.creatures.set(e.id,{root,bar,fill,proxy,...look});
     }
     this.heldSword=makeSword();this.heldSword.position.set(0,-.50,.045);avatar.arms[1].add(this.heldSword);
-    this.heldBow=makeBow();this.heldBow.position.set(0,-.47,.1);avatar.arms[0].add(this.heldBow);
+    const skin=avatar.arms[0].children[1].material,jacket=avatar.arms[0].children[0].material;
+    this.bowRig=new THREE.Group();avatar.body.add(this.bowRig);
+    this.heldBow=makeBow(skin);this.heldBow.position.set(-.35,1.24,.20);this.heldBow.rotation.y=Math.PI/2;this.bowRig.add(this.heldBow);
+    this.bowArms=[-1,1].map(side=>({
+      upper:box(this.bowRig,[.19,1,.21],jacket,0,0,0),fore:box(this.bowRig,[.16,1,.18],jacket,0,0,0),
+      shoulder:new THREE.Vector3(side*.38,1.42,0),elbow:new THREE.Vector3(),hand:new THREE.Vector3(),
+    }));
     this.firstRig=new THREE.Group();camera.add(this.firstRig);scene.add(camera);
     this.firstSword=makeSword();this.firstSword.rotation.z=Math.PI-.18;this.firstSword.position.set(.46,-.52,-.85);this.firstRig.add(this.firstSword);
-    this.firstBow=makeBow();this.firstBow.position.set(-.42,-.20,-.82);this.firstBow.scale.setScalar(.8);this.firstRig.add(this.firstBow);
-    this.firstArrow=makeArrow();this.firstArrow.quaternion.setFromUnitVectors(unitY,new THREE.Vector3(0,0,-1));this.firstArrow.position.set(-.17,-.20,-.86);this.firstRig.add(this.firstArrow);
-    this.heldBow.visible=this.firstBow.visible=this.firstArrow.visible=false;
+    this.firstBow=makeBow(skin);this.firstBow.position.set(-.32,-.20,-.95);this.firstBow.scale.setScalar(.8);this.firstRig.add(this.firstBow);
+    this.heldBow.visible=this.firstBow.visible=this.bowRig.visible=false;
   }
   aim(){
     this.scene.updateMatrixWorld(true);this.camera.updateMatrixWorld();
@@ -134,12 +159,24 @@ export class HuntingView{
     }
     this.effects=this.effects.filter(e=>e.life>0);
     const bow=this.hunting.weapon==='bow';
-    this.heldSword.visible=!bow;this.heldBow.visible=bow;this.firstRig.visible=firstPerson;
-    this.firstSword.visible=!bow;this.firstBow.visible=this.firstArrow.visible=bow;
+    this.heldSword.visible=!bow;this.heldBow.visible=this.bowRig.visible=bow;this.firstRig.visible=firstPerson;
+    this.firstSword.visible=!bow;this.firstBow.visible=bow;
+    avatar.arms.forEach(arm=>{arm.visible=!bow;});
     const swing=this.hunting.swing>0?Math.sin((1-this.hunting.swing/.34)*Math.PI):0;
     if(!bow&&swing>0){avatar.arms[1].rotation.x=-1.4+swing*1.8;avatar.arms[1].rotation.z=-.2-swing*.8;}
-    if(bow){avatar.arms[0].rotation.x=-1.25;avatar.arms[1].rotation.x=-1.05;avatar.arms[1].rotation.z=-.5+this.hunting.draw;}
+    if(bow){
+      const age=.24-this.hunting.release;
+      const recoil=this.hunting.release>0?Math.sin(age/.24*Math.PI):0;
+      const pull=this.hunting.drawing?this.hunting.charge:this.hunting.release>0?this.hunting.lastCharge*Math.exp(-age*65)+Math.sin(age*95)*.045*Math.exp(-age*14):0;
+      const loaded=this.hunting.release===0;
+      poseBow(this.heldBow,pull,loaded);poseBow(this.firstBow,pull,loaded);
+      const [left,right]=this.bowArms;
+      left.elbow.set(-.46,1.15,.26);left.hand.set(-.35,1.19,.52);
+      right.elbow.set(.38+pull*.13,1.14+pull*.12,.23-pull*.44);right.hand.set(-.31,1.19,.20-pull*.52);
+      for(const arm of this.bowArms){setSegment(arm.upper,arm.shoulder,arm.elbow);setSegment(arm.fore,arm.elbow,arm.hand);}
+      this.firstBow.rotation.set(0,-Math.PI/2+.18-pull*.08,-.12+pull*.09+recoil*.07);
+      this.firstBow.position.set(-.32+pull*.055,-.20+pull*.035,-.95-pull*.03+recoil*.09);
+    }
     this.firstSword.rotation.z=Math.PI-.18+swing*1.3;this.firstSword.position.x=.46-swing*.42;
-    this.firstBow.rotation.z=this.hunting.draw*.2;this.firstArrow.position.z=-.86+this.hunting.draw*.8;
   }
 }

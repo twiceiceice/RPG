@@ -32,6 +32,7 @@ const keys = new Set();
 let started = false, paused = true, locked = false, firstPerson = false;
 let yaw = .16, pitch = .29, cameraDistance = 7.4, phase = 0, previousTime = 0, accumulator = 0;
 let touchX = 0, touchZ = 0, touchSprint = false, dragging = null, toastTimer;
+let drawOwner = null, mouseDrawPosition = null, touchDrawPointer = null;
 const focus = new THREE.Vector3(), desired = new THREE.Vector3(), offset = new THREE.Vector3();
 const raycaster = new THREE.Raycaster();
 const input = { x: 0, z: 0, sprint: false };
@@ -42,7 +43,7 @@ function notify(message) {
   $('toast').textContent = message; $('toast').hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3600);
 }
-function clearInput() { keys.clear(); touchX = touchZ = 0; dragging = null; $('stick').style.transform = ''; }
+function clearInput() { cancelBowDraw(); keys.clear(); touchX = touchZ = 0; dragging = null; $('stick').style.transform = ''; }
 function capturePointer(element, pointerId) {
   // Embedded browsers can reject capture while pointer lock is changing.
   try { element.setPointerCapture(pointerId); } catch { /* Dragging still works inside the play area. */ }
@@ -58,7 +59,7 @@ async function lockMouse() {
     if (!renderer.domElement.requestPointerLock) throw new Error('unsupported');
     await renderer.domElement.requestPointerLock();
   } catch {
-    notify('우클릭 드래그로 시점 회전 · 좌클릭 또는 F로 공격해요.');
+    notify('우클릭 드래그로 시점 회전 · 활은 좌클릭을 누르고 있다 놓아 쏘세요.');
   }
 }
 function play() {
@@ -83,13 +84,16 @@ function resetPosition() {
   updateCamera(1, true); updateHUD(); notify('시작 위치에서 체력을 회복했어요.');
 }
 function equipWeapon(weapon) {
+  cancelBowDraw();
   hunting.equip(weapon);
   const bow = weapon === 'bow';
   for (const [id, selected] of [['sword-button', !bow], ['bow-button', bow]]) {
     $(id).classList.toggle('selected', selected); $(id).setAttribute('aria-pressed', String(selected));
   }
   $('weapon-name').textContent = bow ? '들판의 활' : '여행자의 칼';
-  $('weapon-hint').textContent = bow ? '클릭 / F · 중앙 조준 · 무한 화살' : '클릭 / F · 가까이서 베기';
+  $('weapon-hint').textContent = bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '클릭 / F · 가까이서 베기';
+  $('touch-attack').textContent = bow ? '당기기' : '공격';
+  $('touch-attack').setAttribute('aria-label', bow ? '누르고 활 당기기, 놓으면 발사' : '칼로 공격');
   if (bow && pitch > .10) pitch = .08;
   updateCamera(1, true); world.focus({ preventScroll: true });
 }
@@ -99,6 +103,26 @@ function attack() {
   const attacked = hunting.attack(player, { x: -Math.sin(yaw), y: aim.direction.y, z: -Math.cos(yaw) }, aim.point);
   if (attacked) avatar.root.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
   return attacked;
+}
+function beginBowDraw(owner) {
+  if (!started || paused || drawOwner || !hunting.beginDraw()) return false;
+  drawOwner = owner;
+  return true;
+}
+function clearDrawOwner() {
+  drawOwner = null; mouseDrawPosition = null;
+  const pointer = touchDrawPointer; touchDrawPointer = null;
+  if (pointer !== null && $('touch-attack').hasPointerCapture(pointer)) $('touch-attack').releasePointerCapture(pointer);
+}
+function cancelBowDraw() { clearDrawOwner(); hunting.cancelDraw(); }
+function releaseBowDraw(owner) {
+  if (drawOwner !== owner) return false;
+  clearDrawOwner();
+  if (!started || paused || hunting.hp <= 0) { hunting.cancelDraw(); return false; }
+  // Aim at release, so the player can track a moving target while drawing.
+  updateCamera(1, true);
+  const aim = huntingView.aim();
+  return hunting.releaseDraw(player, { x: -Math.sin(yaw), y: aim.direction.y, z: -Math.cos(yaw) }, aim.point);
 }
 $('sword-button').addEventListener('click', () => equipWeapon('sword'));
 $('bow-button').addEventListener('click', () => equipWeapon('bow'));
@@ -133,19 +157,43 @@ document.addEventListener('keydown', event => {
   if (!started || paused) return;
   keys.add(event.code);
   if (event.code === 'Space') player.jump();
-  if (event.code === 'KeyF') attack();
+  if (event.code === 'KeyF') { if (hunting.weapon === 'bow') beginBowDraw('keyboard'); else attack(); }
 });
-document.addEventListener('keyup', event => keys.delete(event.code));
+document.addEventListener('keyup', event => {
+  keys.delete(event.code);
+  if (event.code === 'KeyF') releaseBowDraw('keyboard');
+});
 window.addEventListener('blur', () => { if (started) setPaused(true); });
 document.addEventListener('visibilitychange', () => { if (document.hidden && started) setPaused(true); });
 function look(dx, dy) {
   yaw -= dx * .0027;
   pitch = THREE.MathUtils.clamp(pitch + dy * .0024, firstPerson ? -1.25 : -.2, 1.25);
 }
-document.addEventListener('mousemove', event => { if (locked && !paused) look(event.movementX, event.movementY); });
+document.addEventListener('mousemove', event => {
+  if (paused) return;
+  if (locked) look(event.movementX, event.movementY);
+  if (drawOwner !== 'mouse') return;
+  if (!(event.buttons & 1)) { cancelBowDraw(); return; }
+  if (!locked && !dragging && mouseDrawPosition) look(event.clientX - mouseDrawPosition.x, event.clientY - mouseDrawPosition.y);
+  mouseDrawPosition = { x: event.clientX, y: event.clientY };
+});
 world.addEventListener('contextmenu', event => event.preventDefault());
+// Mouse up is separate from pointer up: releasing left must fire even if right is still held.
+world.addEventListener('mousedown', event => {
+  if (event.button !== 0 || hunting.weapon !== 'bow') return;
+  event.preventDefault(); world.focus({ preventScroll: true });
+  if (beginBowDraw('mouse')) mouseDrawPosition = { x: event.clientX, y: event.clientY };
+});
+window.addEventListener('mouseup', event => {
+  if (event.button === 0) releaseBowDraw('mouse');
+  if (dragging?.type === 'mouse' && dragging.button === event.button && event.button !== 0) {
+    const id = dragging.id; dragging = null;
+    if (world.hasPointerCapture(id)) world.releasePointerCapture(id);
+  }
+});
 world.addEventListener('pointerdown', event => {
   if (!started || paused) return;
+  if (event.pointerType === 'mouse' && event.button === 0 && hunting.weapon === 'bow') return;
   if (locked) { if (event.button === 0) attack(); return; }
   dragging = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: 0, type: event.pointerType, button: event.button };
   capturePointer(world, event.pointerId); world.focus();
@@ -157,13 +205,18 @@ world.addEventListener('pointermove', event => {
   dragging.x = event.clientX; dragging.y = event.clientY;
 });
 window.addEventListener('pointerup', event => {
+  if (event.pointerId === touchDrawPointer) { releaseBowDraw(`touch:${event.pointerId}`); return; }
   if (!dragging || event.pointerId !== dragging.id) return;
   const click = dragging.moved < 5 && dragging.type === 'mouse' && dragging.button === 0;
   dragging = null;
   if (world.hasPointerCapture(event.pointerId)) world.releasePointerCapture(event.pointerId);
   if (click) attack();
 });
-world.addEventListener('pointercancel', () => { dragging = null; });
+window.addEventListener('pointercancel', event => {
+  if (event.pointerId === touchDrawPointer || (event.pointerType === 'mouse' && drawOwner === 'mouse')) cancelBowDraw();
+  if (dragging?.id === event.pointerId) dragging = null;
+});
+world.addEventListener('lostpointercapture', event => { if (dragging?.id === event.pointerId) dragging = null; });
 world.addEventListener('wheel', event => {
   event.preventDefault();
   if (firstPerson && event.deltaY > 0) { cameraDistance = 2.5; setView('third'); }
@@ -191,7 +244,14 @@ for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) joystic
   stickPointer = null; touchX = touchZ = 0; $('stick').style.transform = '';
 });
 $('touch-jump').addEventListener('pointerdown', event => { event.preventDefault(); if (started && !paused) player.jump(); });
-$('touch-attack').addEventListener('pointerdown', event => { event.preventDefault(); attack(); });
+$('touch-attack').addEventListener('pointerdown', event => {
+  event.preventDefault();
+  if (hunting.weapon !== 'bow') { attack(); return; }
+  if (beginBowDraw(`touch:${event.pointerId}`)) {
+    touchDrawPointer = event.pointerId; capturePointer($('touch-attack'), event.pointerId);
+  }
+});
+$('touch-attack').addEventListener('lostpointercapture', event => { if (event.pointerId === touchDrawPointer) cancelBowDraw(); });
 $('touch-run').addEventListener('click', () => { touchSprint = !touchSprint; $('touch-run').setAttribute('aria-pressed', String(touchSprint)); });
 function updateInput(dt) {
   if (keys.has('KeyQ')) yaw += 1.8 * dt;
@@ -276,7 +336,15 @@ function combatFeedback(dt) {
   if (!paused) hitFeedback = Math.max(0, hitFeedback - dt);
   $('crosshair').classList.toggle('hit', hitFeedback > 0);
   $('damage-flash').style.opacity = String(hunting.hurt * 2);
-  $('cooldown-fill').style.width = `${Math.max(0, 1 - hunting.cooldown / (hunting.weapon === 'bow' ? .72 : .43)) * 100}%`;
+  $('cooldown-fill').style.width = `${Math.max(0, 1 - hunting.cooldown / (hunting.weapon === 'bow' ? .45 : .43)) * 100}%`;
+  const charge = Math.round(hunting.charge * 100);
+  $('bow-charge').hidden = !hunting.drawing || paused;
+  $('bow-charge').classList.toggle('ready', charge === 100);
+  $('charge-meter').setAttribute('aria-valuenow', String(charge));
+  $('charge-fill').style.width = `${charge}%`;
+  $('charge-label').textContent = charge === 100 ? '가득 당김 · 놓으면 발사' : `당기는 중 ${charge}% · 놓으면 발사`;
+  $('crosshair').classList.toggle('drawing', hunting.drawing);
+  $('crosshair').classList.toggle('charged', hunting.drawing && charge === 100);
   for (let i = floatingHits.length - 1; i >= 0; i--) {
     const hit = floatingHits[i]; if (!paused) { hit.life -= dt; hit.position.y += dt * .8; }
     const point = hit.position.clone().project(camera);
@@ -322,6 +390,7 @@ if (modelContext?.registerTool) {
     position: { x: +player.x.toFixed(3), y: +player.y.toFixed(3), z: +player.z.toFixed(3) },
     grounded: player.grounded, view: firstPerson ? 'first' : 'third',
     paused, started, health: Math.ceil(hunting.hp), weapon: hunting.weapon, kills: { ...hunting.kills },
+    bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
     creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,position:{x:+e.x.toFixed(2),y:+e.y.toFixed(2),z:+e.z.toFixed(2)}})),
   });
   const validateEmpty = value => {
@@ -350,10 +419,18 @@ if (modelContext?.registerTool) {
         if (!input || !['sword', 'bow'].includes(input.weapon) || Object.keys(input).some(k => k !== 'weapon')) throw new Error('weapon must be sword or bow.');
         equipWeapon(input.weapon); return state();
       } },
-    { name: 'attack_with_weapon', title: '장착한 무기로 공격', description: 'Attack in the current aimed direction using the equipped weapon, matching click or F. Requires active play and a ready weapon.',
+    { name: 'attack_with_weapon', title: '칼로 공격', description: 'Swing the equipped sword, matching click or F. For a bow use begin_bow_draw then release_bow_draw. Requires active play and a ready weapon.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
-      execute(input) { validateEmpty(input); if (!attack()) throw new Error('Start or resume play, and wait until the weapon is ready.'); return { attacked: true, weapon: hunting.weapon }; } },
+      execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip the sword, start or resume play, and wait until it is ready. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
+    { name: 'begin_bow_draw', title: '활 당기기', description: 'Begin holding the equipped bow, matching left mouse down or F down. Hold up to 1.05 seconds for full power. Does not fire until release_bow_draw.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute(input) { validateEmpty(input); if (!beginBowDraw('tool')) throw new Error('Equip a ready bow and resume play. A draw must not already be active.'); return state(); } },
+    { name: 'release_bow_draw', title: '활 놓아 발사', description: 'Release a draw started by begin_bow_draw. Fires one arrow toward the current aim with speed and damage based on hold duration.',
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: false, untrustedContentHint: false },
+      execute(input) { validateEmpty(input); if (!releaseBowDraw('tool')) throw new Error('Begin drawing the bow first; switching weapons or pausing cancels the draw.'); return state(); } },
   ];
   for (const tool of tools) {
     try { void Promise.resolve(modelContext.registerTool(tool, { signal: lifecycle.signal })).catch(() => {}); } catch { /* Browsers without the proposed API still play normally. */ }
