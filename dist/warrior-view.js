@@ -108,22 +108,17 @@ export class WarriorView {
         avatar.legs[0].rotation.x = -.88*flight; avatar.legs[1].rotation.x = -1.48*flight;
         avatar.legs[0].rotation.z = .17*flight; avatar.legs[1].rotation.z = -.07*flight;
       } else if (id === 'sweep') {
-        const retrieve=ease(elapsed/.20), pull=ease((elapsed-.52)/.22), swing=ease((elapsed-.74)/.48), recover=ease((elapsed-1.26)/.39);
-        if (elapsed < .52) {
-          this.placePlanted(a.anchor);
-          avatar.body.rotation.y=-2.5*retrieve;
-          avatar.legs.forEach((leg,i)=>{leg.rotation.x=Math.sin(elapsed*24+i*Math.PI)*.48;});
-        } else {
-          this.placeLocal(player,dx,dz,mix(-.08,-.2,recover),mix(1.05,.64,recover),mix(.14,.30,recover),mix(Math.PI/2,.17,recover),mix(-1.85+swing*3.70,0,recover),mix(0,-.42,recover),.20*recover);
-          if (elapsed < .74) {
-            this.blendPosition.copy(this.axe.position); this.blendRotation.copy(this.axe.quaternion);
-            this.placePlanted(a.anchor,pull*.45);
-            this.axe.position.lerp(this.blendPosition,pull);this.axe.quaternion.slerp(this.blendRotation,pull);
-          }
-          avatar.body.rotation.y=mix(mix(-2.5,-1.0,pull)+swing*2.15,0,recover);
-          avatar.body.rotation.z=-.13*Math.sin(swing*Math.PI);avatar.body.position.y=-.10*Math.sin(swing*Math.PI);
-          avatar.legs[0].rotation.x=-.30*Math.sin(swing*Math.PI);avatar.legs[1].rotation.x=.22*Math.sin(swing*Math.PI);
+        const wind=ease(elapsed/.28), recall=ease((elapsed-.08)/.66), swing=ease((elapsed-.74)/.48), recover=ease((elapsed-1.26)/.39);
+        this.placeLocal(player,dx,dz,mix(-.08,-.2,recover),mix(1.05,.64,recover),mix(.14,.30,recover),mix(Math.PI/2,.17,recover),mix(-1.85+swing*3.70,0,recover),mix(0,-.42,recover),.20*recover);
+        if (elapsed < .74) {
+          // Bring the axe to the warrior so the combo keeps its forward momentum.
+          this.blendPosition.copy(this.axe.position); this.blendRotation.copy(this.axe.quaternion);
+          this.placePlanted(a.anchor,Math.sin(recall*Math.PI)*.60);
+          this.axe.position.lerp(this.blendPosition,recall);this.axe.quaternion.slerp(this.blendRotation,recall);
         }
+        avatar.body.rotation.y=mix(-wind+swing*2.15,0,recover);
+        avatar.body.rotation.z=-.13*Math.sin(swing*Math.PI);avatar.body.position.y=-.10*Math.sin(swing*Math.PI);
+        avatar.legs[0].rotation.x=-.30*Math.sin(swing*Math.PI);avatar.legs[1].rotation.x=.22*Math.sin(swing*Math.PI);
       } else if (id === 'slash') {
         const swing = Math.sin(t*Math.PI), arc = -1.2+ease(t)*2.4;
         this.placeLocal(player,dx,dz,-.15,.70+swing*.30,.30,mix(.17,1.40,swing),arc*swing,mix(-.42,0,swing));
@@ -139,7 +134,7 @@ export class WarriorView {
         arm.end.set(0,grip,0); this.axe.localToWorld(arm.end);
         // Release the planted handle after takeoff; do not stretch arms back to it.
         let free = id==='kick' ? ease((elapsed-.16)/.12) : 0;
-        if ((id==='sweep'&&elapsed<.52)||(!a&&w.planted?.kicked)) free=ease((arm.end.distanceTo(arm.shoulder)-.85)/.50);
+        if ((id==='sweep'&&elapsed<.74)||(!a&&w.planted?.kicked)) free=ease((arm.end.distanceTo(arm.shoulder)-.85)/.50);
         if (free>0) {
           this.handPoint.set(arm.side*.48,1.08,-.18);avatar.body.localToWorld(this.handPoint);arm.end.lerp(this.handPoint,free);
         }

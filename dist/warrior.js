@@ -5,7 +5,7 @@ export const WARRIOR_SKILLS = [
   { id: 'charge', key: '1', name: '돌진', detail: '전방으로 돌파', duration: .52, cooldown: 4 },
   { id: 'slam', key: '2', name: '내려찍기', detail: '날을 세워 땅에 내려찍기', duration: 1.08, cooldown: 3.5 },
   { id: 'kick', key: '3', name: '날아차기', detail: '도끼를 짚고 앞으로 날아차기', duration: 1.14, cooldown: 1.2 },
-  { id: 'sweep', key: '4', name: '가로베기', detail: '뒤의 도끼를 뽑아 크게 가로베기', duration: 1.65, cooldown: 1.8 },
+  { id: 'sweep', key: '4', name: '가로베기', detail: '도끼를 끌어와 크게 가로베기', duration: 1.65, cooldown: 1.8 },
 ];
 const skillById = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, s]));
 const followups = { charge: ['slam'], slam: ['kick', 'sweep'], kick: ['sweep'], sweep: [], slash: [] };
@@ -53,7 +53,6 @@ export class Warrior {
     this.active = { id, elapsed: 0, duration: skill?.duration ?? .58, dx: facing.x, dz: facing.z, hit: false, hitIds: new Set(), stopped: false,
       origin: { x: player.x, y: player.y, z: player.z }, launched: false, kickPower: null,
       anchor: this.planted ? { ...this.planted } : null };
-    if (id === 'sweep') this.active.retrieve = { x: this.planted.x - facing.x * .65, z: this.planted.z - facing.z * .65 };
     this.lastSkill = id;
     if (skill) { this.cooldowns[id] = skill.cooldown; this.executions[id]++; }
     player.vx = player.vz = 0; player.jumpBuffer = 0;
@@ -69,13 +68,8 @@ export class Warrior {
       const a = this.active;
       let speed = a.id === 'charge' && a.elapsed < .36 && !a.stopped ? 18 : 0;
       if (a.id === 'kick' && a.elapsed >= .14 && a.elapsed < .66) speed = 6.2;
-      if (a.id === 'sweep' && a.elapsed >= .76 && a.elapsed < 1.17) speed = 9;
+      if (a.id === 'sweep' && a.elapsed >= .76 && a.elapsed < 1.17) speed = 4.5;
       input.forcedVelocity = { x: a.dx * speed, z: a.dz * speed };
-      if (a.id === 'sweep' && a.elapsed < .52) {
-        const x = a.retrieve.x - player.x, z = a.retrieve.z - player.z, distance = Math.hypot(x, z);
-        const speed = Math.min(9, distance * 120);
-        input.forcedVelocity = distance > .04 ? { x: x / distance * speed, z: z / distance * speed } : { x: 0, z: 0 };
-      }
     } else if (this.planted) {
       // Walking or jumping retrieves the axe without creating an attack.
       if (Math.hypot(input.x, input.z) > .1 || player.jumpBuffer > 0) this.planted = null;

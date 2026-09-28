@@ -342,7 +342,7 @@ function updateWarriorHUD() {
   const phaseLabels = {
     charge: '돌파', slam: elapsed < .43 ? '날 세우기' : elapsed < .64 ? '내려찍기' : '도끼 고정',
     kick: elapsed < .14 ? '도약' : elapsed < .70 ? '날아차기' : '착지',
-    sweep: elapsed < .52 ? '뒤로 잡기' : elapsed < .74 ? '뽑기' : elapsed < 1.26 ? '크게 베기' : '마무리',
+    sweep: elapsed < .52 ? '끌어오기' : elapsed < .74 ? '도끼 잡기' : elapsed < 1.26 ? '크게 베기' : '마무리',
   };
   for (const skill of WARRIOR_SKILLS) {
     const button = $('skill-' + skill.id), remaining = warrior.cooldowns[skill.id];
@@ -358,7 +358,7 @@ function updateWarriorHUD() {
   const name = WARRIOR_SKILLS.find(s => s.id === a?.id)?.name;
   $('combo-title').textContent = a?.id === 'kick' && a.kickPower ? `날아차기 · ${a.kickPower.name} · ${a.kickPower.damage} 피해 / ${a.kickPower.distance}m 밀침` : name ?? (a?.id === 'slash' ? '기본 베기' : warrior.planted ? warrior.planted.kicked ? '뒤에 남은 도끼로 마무리' : '도끼가 박혔어요' : '양손 도끼 전사');
   $('combo-hint').textContent = warrior.queued ? `${WARRIOR_SKILLS.find(s=>s.id===warrior.queued.id).name} 예약됨`
-    : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '뒤의 도끼를 잡으러 돌아가는 중' : elapsed < .74 ? '도끼를 뽑아 몸을 틀기' : '앞으로 파고들며 크게 가로베기', slash: '기본 공격 중' }[a.id]
+    : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '현재 위치에서 도끼를 끌어오기' : elapsed < .74 ? '도끼를 잡아 몸을 틀기' : '앞으로 파고들며 크게 가로베기', slash: '기본 공격 중' }[a.id]
     : warrior.planted ? `${warrior.planted.kicked ? '4 가로베기' : '3 날아차기 → 4 가로베기'} · ${warrior.planted.remaining.toFixed(1)}초 안에 연계`
     : '1 돌진 → 2 내려찍기 → 3 날아차기 → 4 가로베기';
   $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / 3.4 * 100 : 0}%`;
@@ -493,7 +493,7 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip a ready axe or sword and resume play. Recover a planted axe with skill 4. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
-    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill, matching keys 1 charge, 2 slam, 3 kick, 4 sweep. Kick and sweep require the axe planted by slam. Kick physically leaps forward and rolls light/medium/strong power once on contact using a drought-reducing pseudo-random distribution: 18/26/36 damage and 3/4.5/6 metre knockback, limited by walls. Surviving targets are off balance for 4 seconds and their next hit takes double damage once. Sweep returns to the planted axe, pulls it out, then lunges forward with a wide cut. One valid follow-up can be queued during the current skill. Returns acceptance and actual state; animation and impact advance in real time.',
+    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill, matching keys 1 charge, 2 slam, 3 kick, 4 sweep. Kick and sweep require the axe planted by slam. Kick physically leaps forward and rolls light/medium/strong power once on contact using a drought-reducing pseudo-random distribution: 18/26/36 damage and 3/4.5/6 metre knockback, limited by walls. Surviving targets are off balance for 4 seconds and their next hit takes double damage once. Sweep recalls the planted axe to the current position without moving backward, then lunges forward with a wide cut. One valid follow-up can be queued during the current skill. Returns acceptance and actual state; animation and impact advance in real time.',
       inputSchema: { type: 'object', properties: { skill: { type: 'string', enum: ['charge','slam','kick','sweep'] } }, required: ['skill'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {
