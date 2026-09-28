@@ -140,6 +140,13 @@ export class HuntingView{
       v.root.position.set(e.x,e.y,e.z);v.root.rotation.y=e.heading;v.g.position.y=e.hop;v.proxy.position.y=e.height*.5+e.hop;
       const vulnerable=e.offBalance>0,wobble=vulnerable?Math.min(1,e.offBalance/.3)*(e.stagger>0?.23:.12):0;
       v.g.rotation.z=Math.sin(this.hunting.time*12+e.variant)*wobble;v.g.rotation.x=Math.cos(this.hunting.time*9)*wobble*.4;
+      if(e.knockback){
+        const k=e.knockback,t=k.elapsed/k.duration,tilt=Math.sin(t*Math.PI);
+        v.g.rotation.x-=tilt*(k.id==='strong'?1.35:k.id==='medium'?.80:.40);
+        v.g.rotation.z+=tilt*(k.id==='strong'?.65:.20);
+        v.dust=(v.dust??0)-dt;
+        if(!paused&&v.dust<=0){v.dust=.10;this.particleBurst({type:'impact',kind:'impact',x:e.x,y:e.y+.08,z:e.z});}
+      }
       v.opening.visible=vulnerable;v.opening.rotation.y=this.hunting.time*2.8;v.opening.position.y=e.height+.78+e.hop;
       if(e.kind==='slime'){
         const squash=e.windup>0?1-Math.sin(e.windup/.5*Math.PI)*.22:1+Math.sin(e.phase)*.06;

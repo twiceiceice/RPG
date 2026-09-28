@@ -40,6 +40,7 @@ export class WarriorView {
     this.rig = new THREE.Group(); scene.add(this.rig);
     this.axe = makeAxe(); this.rig.add(this.axe);
     this.rotation = new THREE.Quaternion(); this.localRotation = new THREE.Quaternion(); this.euler = new THREE.Euler();
+    this.bladeRoll = new THREE.Quaternion(); this.cameraRotation = new THREE.Quaternion();
     this.position = new THREE.Vector3(); this.handPoint = new THREE.Vector3();
     this.blendPosition = new THREE.Vector3(); this.blendRotation = new THREE.Quaternion();
     const metal = mat(0x354e54, { metalness: .48 }), trim = mat(0xd9a255, { metalness: .45 }), glove = mat(0x49392b);
@@ -60,86 +61,101 @@ export class WarriorView {
     this.firstBoots = [-1,1].map(side=>box(this.firstRig,[.19,.23,.40],glove,side*.15,-.68,-.72));
     this.ringGeometry = new THREE.RingGeometry(.90,1,56);
     this.arcGeometry = new THREE.RingGeometry(.86,1,40,1,-1.40,2.80);
+    this.trailSamples = []; this.trailGeometry = new THREE.BufferGeometry();
+    this.trailVertices = new Float32Array(24*18);
+    this.trailGeometry.setAttribute('position',new THREE.BufferAttribute(this.trailVertices,3));
+    this.trail = new THREE.Mesh(this.trailGeometry,new THREE.MeshBasicMaterial({color:0xffdb8b,transparent:true,opacity:.38,side:THREE.DoubleSide,depthWrite:false}));
+    this.trail.frustumCulled=false;this.trail.visible=false;scene.add(this.trail);
     this.rig.visible = this.firstRig.visible = this.armor.visible = false;
   }
-  placeLocal(player, dx, dz, x, y, z, rx, ry, rz) {
+  placeLocal(player, dx, dz, x, y, z, rx, ry, rz, roll = 0) {
     const angle = Math.atan2(dx,dz); this.rotation.setFromAxisAngle(Y,angle);
     this.axe.position.set(x,y,z).applyQuaternion(this.rotation).add(this.position.set(player.x,player.y,player.z));
-    this.localRotation.setFromEuler(this.euler.set(rx,ry,rz)); this.axe.quaternion.copy(this.rotation).multiply(this.localRotation);
+    this.localRotation.setFromEuler(this.euler.set(rx,ry,rz,'YXZ'));
+    this.bladeRoll.setFromAxisAngle(Y,roll);
+    this.axe.quaternion.copy(this.rotation).multiply(this.localRotation).multiply(this.bladeRoll);
   }
   placePlanted(anchor, lift = 0) {
-    this.placeLocal({x:anchor.x,y:anchor.y,z:anchor.z},anchor.dx,anchor.dz,0,1.64+lift,-.30,Math.PI-.18,0,0);
+    // The blade plane follows the vertical chop; its sharpened outer edge bites
+    // into the ground while the handle leans back toward the warrior.
+    this.placeLocal({x:anchor.x,y:anchor.y,z:anchor.z},anchor.dx,anchor.dz,0,1.40+lift,-1.20,2.20,0,0,Math.PI/2);
   }
   update(dt, firstPerson, player, paused) {
     const w = this.warrior, avatar = this.avatar, equipped = w.combat.weapon === 'axe';
     this.armor.visible = equipped; this.rig.visible = equipped && !firstPerson; this.firstRig.visible = equipped && firstPerson;
     if (equipped) {
       avatar.arms.forEach(arm=>{arm.visible=false;});
-      const a = w.active, id = a?.id, t = a ? a.elapsed/a.duration : 0;
+      const a = w.active, id = a?.id, t = a ? a.elapsed/a.duration : 0, elapsed = a?.elapsed ?? 0;
       const angle = avatar.root.rotation.y, dx = a?.dx ?? w.planted?.dx ?? Math.sin(angle), dz = a?.dz ?? w.planted?.dz ?? Math.cos(angle);
-      const idle = () => this.placeLocal(player,dx,dz,-.20,.64,.30,.17,0,-.42);
+      const idle = () => this.placeLocal(player,dx,dz,-.20,.64,.30,.17,0,-.42,.20);
       idle();
       let flight = 0;
       if (id === 'charge') {
         avatar.body.rotation.x = .20; avatar.legs.forEach((leg,i)=>{leg.rotation.x=Math.sin(t*22+i*Math.PI)*.8;});
         this.placeLocal(player,dx,dz,-.35,.72,.2,-.3,0,-.70);
       } else if (id === 'slam') {
-        const wind = ease(t/.35), strike = ease((t-.35)/.22);
-        if (t < .56) this.placeLocal(player,dx,dz,mix(-.2,0,wind),mix(.64,1.64,wind),mix(.3,-.32,wind)+strike*1.08,mix(.17,-.65,wind)+strike*(Math.PI+.47),0,mix(-.42,0,wind));
+        const wind = ease(elapsed/.43), strike = Math.pow(THREE.MathUtils.clamp((elapsed-.43)/.21,0,1),2);
+        if (elapsed < .64) this.placeLocal(player,dx,dz,mix(-.2,0,wind),mix(.64,1.40,wind),mix(.3,-.28,wind)+strike*.53,mix(.17,-.90,wind)+strike*3.10,0,mix(-.42,0,wind),mix(.20,Math.PI/2,wind));
         else if (a.anchor) this.placePlanted(a.anchor);
-        avatar.body.position.y -= strike*.13; avatar.body.rotation.x = -.10*wind+.28*strike;
-        avatar.legs.forEach(leg=>{leg.rotation.x=-.16*strike;});
+        avatar.body.position.y -= strike*.20; avatar.body.rotation.x = -.12*wind+.34*strike;
+        avatar.legs.forEach((leg,i)=>{leg.rotation.x=(i?-.28:.16)*strike;});
       } else if (id === 'kick') {
         this.placePlanted(a.anchor);
-        flight = Math.pow(Math.sin(t*Math.PI),.8);
-        avatar.body.position.y = .66*flight;
-        avatar.body.position.x = -.10*flight; avatar.body.position.z = .24*flight;
-        avatar.body.rotation.x = -.12*flight; avatar.body.rotation.z = -.16*flight;
-        avatar.legs[0].rotation.x = -1.35*flight; avatar.legs[1].rotation.x = -1.48*flight;
-        avatar.legs[0].rotation.z = .10*flight; avatar.legs[1].rotation.z = -.10*flight;
+        flight = ease((elapsed-.12)/.15)*(1-ease((elapsed-.70)/.27));
+        const crouch=Math.sin(Math.min(1,elapsed/.14)*Math.PI)*.16;
+        avatar.body.position.y = -crouch+.09*flight;
+        avatar.body.rotation.x = -.48*flight; avatar.body.rotation.z = -.14*flight;
+        avatar.legs[0].rotation.x = -.88*flight; avatar.legs[1].rotation.x = -1.48*flight;
+        avatar.legs[0].rotation.z = .17*flight; avatar.legs[1].rotation.z = -.07*flight;
       } else if (id === 'sweep') {
-        if (t < .23) this.placePlanted(a.anchor,ease(t/.23)*.50);
-        else {
-          const swing = ease((t-.23)/.45), recover = ease((t-.73)/.27);
-          this.placeLocal(player,dx,dz,mix(0,-.2,recover),mix(1.0,.64,recover),mix(.24,.30,recover),mix(Math.PI/2,.17,recover),mix(-1.35+swing*2.85,0,recover),mix(0,-.42,recover));
-          if (t < .39) {
+        const retrieve=ease(elapsed/.20), pull=ease((elapsed-.52)/.22), swing=ease((elapsed-.74)/.48), recover=ease((elapsed-1.26)/.39);
+        if (elapsed < .52) {
+          this.placePlanted(a.anchor);
+          avatar.body.rotation.y=-2.5*retrieve;
+          avatar.legs.forEach((leg,i)=>{leg.rotation.x=Math.sin(elapsed*24+i*Math.PI)*.48;});
+        } else {
+          this.placeLocal(player,dx,dz,mix(-.08,-.2,recover),mix(1.05,.64,recover),mix(.14,.30,recover),mix(Math.PI/2,.17,recover),mix(-1.85+swing*3.70,0,recover),mix(0,-.42,recover),.20*recover);
+          if (elapsed < .74) {
             this.blendPosition.copy(this.axe.position); this.blendRotation.copy(this.axe.quaternion);
-            this.placePlanted(a.anchor,.50);
-            const release=ease((t-.23)/.16);this.axe.position.lerp(this.blendPosition,release);this.axe.quaternion.slerp(this.blendRotation,release);
+            this.placePlanted(a.anchor,pull*.45);
+            this.axe.position.lerp(this.blendPosition,pull);this.axe.quaternion.slerp(this.blendRotation,pull);
           }
-          avatar.body.rotation.y = Math.sin(swing*Math.PI)*.34; avatar.body.rotation.z = -.12*Math.sin(swing*Math.PI);
+          avatar.body.rotation.y=mix(mix(-2.5,-1.0,pull)+swing*2.15,0,recover);
+          avatar.body.rotation.z=-.13*Math.sin(swing*Math.PI);avatar.body.position.y=-.10*Math.sin(swing*Math.PI);
+          avatar.legs[0].rotation.x=-.30*Math.sin(swing*Math.PI);avatar.legs[1].rotation.x=.22*Math.sin(swing*Math.PI);
         }
       } else if (id === 'slash') {
         const swing = Math.sin(t*Math.PI), arc = -1.2+ease(t)*2.4;
         this.placeLocal(player,dx,dz,-.15,.70+swing*.30,.30,mix(.17,1.40,swing),arc*swing,mix(-.42,0,swing));
       } else if (w.planted) {
-        this.placePlanted(w.planted); avatar.body.rotation.x = .15; avatar.body.position.y = -.10;
+        this.placePlanted(w.planted);
+        if (!w.planted.kicked) { avatar.body.rotation.x = .15; avatar.body.position.y = -.10; }
       }
       avatar.root.updateMatrixWorld(true); this.axe.updateMatrixWorld(true);
       for (const arm of this.arms) {
         arm.shoulder.set(arm.side*.38,1.42,0); avatar.body.localToWorld(arm.shoulder);
         const restingGrip=arm.side<0?.72:.35;
-        const grip = id === 'kick' ? mix(restingGrip,arm.side<0?.10:.30,ease(t/.18)*(1-ease((t-.82)/.18))) : restingGrip;
+        const grip = id === 'kick' ? arm.side<0?.08:.28 : restingGrip;
         arm.end.set(0,grip,0); this.axe.localToWorld(arm.end);
+        // Release the planted handle after takeoff; do not stretch arms back to it.
+        let free = id==='kick' ? ease((elapsed-.16)/.12) : 0;
+        if ((id==='sweep'&&elapsed<.52)||(!a&&w.planted?.kicked)) free=ease((arm.end.distanceTo(arm.shoulder)-.85)/.50);
+        if (free>0) {
+          this.handPoint.set(arm.side*.48,1.08,-.18);avatar.body.localToWorld(this.handPoint);arm.end.lerp(this.handPoint,free);
+        }
         arm.elbow.copy(arm.shoulder).lerp(arm.end,.48);
         arm.elbow.x += arm.side*.18*Math.cos(angle); arm.elbow.z -= arm.side*.18*Math.sin(angle); arm.elbow.y -= .10;
         segment(arm.upper,arm.shoulder,arm.elbow); segment(arm.fore,arm.elbow,arm.end);
         arm.hand.position.copy(arm.end); arm.hand.quaternion.copy(this.axe.quaternion);
       }
-      this.firstAxe.scale.setScalar(.67); this.firstAxe.position.set(.22,-.69,-1.18); this.firstAxe.rotation.set(.16,0,-.30);
-      if (id === 'slam') {
-        const wind=ease(t/.35),strike=ease((t-.35)/.22);
-        this.firstAxe.position.set(.22*(1-wind),-.69+wind*.36-strike*.08,-1.18);
-        this.firstAxe.rotation.set(-.65*wind+strike*(Math.PI+.47),0,-.30*(1-wind));
-      } else if (w.planted || id === 'kick' || (id==='sweep'&&t<.23)) {
-        this.firstAxe.position.set(-.06,-.17,-1.0); this.firstAxe.rotation.set(Math.PI-.18,0,0);
-      }
-      if (id === 'sweep' || id === 'slash') {
-        const swing = Math.sin(t*Math.PI);
-        this.firstAxe.position.x=.22-swing*.3;this.firstAxe.rotation.set(.16+swing*1.15,-1.0+ease(t)*2.0,-.30+swing*.2);
-      }
+      this.firstAxe.visible=!(id==='kick'&&elapsed>.23)&&!(id==='sweep'&&elapsed<.52)&&!(!a&&w.planted?.kicked);
+      this.firstAxe.scale.setScalar(.67); this.firstAxe.position.set(.25,-.68,-1.28);
+      this.camera.getWorldQuaternion(this.cameraRotation);this.firstAxe.quaternion.copy(this.cameraRotation.invert()).multiply(this.axe.quaternion);
+      if (id==='slam') this.firstAxe.position.set(.25*(1-ease(elapsed/.43)),-.68+ease(elapsed/.43)*.27,-1.34);
+      if (id==='sweep') this.firstAxe.position.set(.15-Math.sin(ease((elapsed-.74)/.48)*Math.PI)*.40,-.48,-1.35);
       this.firstBoots.forEach((boot,i)=>{boot.visible=id==='kick';boot.position.set((i?1:-1)*.20,-.70+flight*.64,-.68-flight*.40);boot.rotation.x=-flight*.45;});
     }
+    this.updateTrail(dt,paused,firstPerson,equipped);
     for (const e of this.effects) {
       if (!paused) e.life -= dt;
       const p=1-Math.max(0,e.life/e.total);e.object.scale.setScalar(e.radius*(.28+p*.72));
@@ -147,6 +163,24 @@ export class WarriorView {
       if(e.life<=0){this.scene.remove(e.object);e.object.material.dispose();}
     }
     this.effects=this.effects.filter(e=>e.life>0);
+  }
+  updateTrail(dt,paused,firstPerson,equipped) {
+    const a=this.warrior.active,elapsed=a?.elapsed??0;
+    if(!paused){
+      this.trailSamples=this.trailSamples.filter(s=>(s.life-=dt)>0);
+      if(equipped&&((a?.id==='slam'&&elapsed>.43&&elapsed<.69)||(a?.id==='sweep'&&elapsed>.74&&elapsed<1.26)||(a?.id==='slash'&&elapsed>.14&&elapsed<.42))){
+        this.axe.updateMatrixWorld(true);
+        this.trailSamples.push({outer:this.axe.localToWorld(new THREE.Vector3(-.72,1.65,0)),inner:this.axe.localToWorld(new THREE.Vector3(0,.85,0)),life:.17});
+        if(this.trailSamples.length>24)this.trailSamples.shift();
+      }
+    }
+    let n=0;
+    for(let i=1;i<this.trailSamples.length;i++){
+      const p=this.trailSamples[i-1],q=this.trailSamples[i];
+      for(const point of [p.inner,p.outer,q.outer,p.inner,q.outer,q.inner]){this.trailVertices[n++]=point.x;this.trailVertices[n++]=point.y;this.trailVertices[n++]=point.z;}
+    }
+    this.trailGeometry.attributes.position.needsUpdate=true;this.trailGeometry.setDrawRange(0,n/3);
+    this.trail.visible=equipped&&!firstPerson&&n>0;
   }
   effect(event) {
     const sweep=['sweep','slash'].includes(event.skill);

@@ -1,10 +1,11 @@
 import { terrainHeight } from './movement.js';
+import { KickPower } from './kick-power.js';
 
 export const WARRIOR_SKILLS = [
   { id: 'charge', key: '1', name: '돌진', detail: '전방으로 돌파', duration: .52, cooldown: 4 },
-  { id: 'slam', key: '2', name: '내려찍기', detail: '도끼를 땅에 내려찍기', duration: .92, cooldown: 3.5 },
-  { id: 'kick', key: '3', name: '날아차기', detail: '박힌 도끼를 짚고 날아차기', duration: .88, cooldown: 1.2 },
-  { id: 'sweep', key: '4', name: '가로베기', detail: '도끼를 뽑으며 가로 베기', duration: .94, cooldown: 1.4 },
+  { id: 'slam', key: '2', name: '내려찍기', detail: '날을 세워 땅에 내려찍기', duration: 1.08, cooldown: 3.5 },
+  { id: 'kick', key: '3', name: '날아차기', detail: '도끼를 짚고 앞으로 날아차기', duration: 1.14, cooldown: 1.2 },
+  { id: 'sweep', key: '4', name: '가로베기', detail: '뒤의 도끼를 뽑아 크게 가로베기', duration: 1.65, cooldown: 1.8 },
 ];
 const skillById = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, s]));
 const followups = { charge: ['slam'], slam: ['kick', 'sweep'], kick: ['sweep'], sweep: [], slash: [] };
@@ -13,11 +14,12 @@ export class Warrior {
   constructor(combat) {
     this.combat = combat; this.cooldowns = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, 0]));
     this.active = null; this.planted = null; this.queued = null; this.lastSkill = null;
+    this.kickPower = new KickPower(); this.lastKick = null;
     this.executions = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, 0]));
   }
   cancel(resetCooldowns = false) {
     this.active = null; this.planted = null; this.queued = null;
-    if (resetCooldowns) for (const id in this.cooldowns) this.cooldowns[id] = 0;
+    if (resetCooldowns) { for (const id in this.cooldowns) this.cooldowns[id] = 0; this.lastKick = null; }
   }
   reason(id, player) {
     if (!skillById[id]) return '알 수 없는 기술이에요.';
@@ -49,7 +51,9 @@ export class Warrior {
     const facing = this.planted ? { x: this.planted.dx, z: this.planted.dz } : { x: direction.x / length, z: direction.z / length };
     const skill = skillById[id];
     this.active = { id, elapsed: 0, duration: skill?.duration ?? .58, dx: facing.x, dz: facing.z, hit: false, hitIds: new Set(), stopped: false,
+      origin: { x: player.x, y: player.y, z: player.z }, launched: false, kickPower: null,
       anchor: this.planted ? { ...this.planted } : null };
+    if (id === 'sweep') this.active.retrieve = { x: this.planted.x - facing.x * .65, z: this.planted.z - facing.z * .65 };
     this.lastSkill = id;
     if (skill) { this.cooldowns[id] = skill.cooldown; this.executions[id]++; }
     player.vx = player.vz = 0; player.jumpBuffer = 0;
@@ -63,15 +67,22 @@ export class Warrior {
     input.forcedVelocity = null;
     if (this.active) {
       const a = this.active;
-      const speed = a.id === 'charge' && a.elapsed < .36 && !a.stopped ? 18 : 0;
+      let speed = a.id === 'charge' && a.elapsed < .36 && !a.stopped ? 18 : 0;
+      if (a.id === 'kick' && a.elapsed >= .14 && a.elapsed < .66) speed = 6.2;
+      if (a.id === 'sweep' && a.elapsed >= .76 && a.elapsed < 1.17) speed = 9;
       input.forcedVelocity = { x: a.dx * speed, z: a.dz * speed };
+      if (a.id === 'sweep' && a.elapsed < .52) {
+        const x = a.retrieve.x - player.x, z = a.retrieve.z - player.z, distance = Math.hypot(x, z);
+        const speed = Math.min(9, distance * 120);
+        input.forcedVelocity = distance > .04 ? { x: x / distance * speed, z: z / distance * speed } : { x: 0, z: 0 };
+      }
     } else if (this.planted) {
       // Walking or jumping retrieves the axe without creating an attack.
       if (Math.hypot(input.x, input.z) > .1 || player.jumpBuffer > 0) this.planted = null;
       else input.forcedVelocity = { x: 0, z: 0 };
     }
   }
-  hitArea(player, { x = player.x, z = player.z, radius, damage, cone = -.2, knock = 3, stagger = .3, offBalance = 0 }) {
+  hitArea(player, { x = player.x, z = player.z, radius, damage, cone = -.2, knock = 3, stagger = .3, offBalance = 0, kick = false }) {
     const a = this.active, combat = this.combat; let hits = 0;
     for (const e of combat.entities) {
       if (!e.alive || a.hitIds.has(e.id)) continue;
@@ -79,16 +90,22 @@ export class Warrior {
       if (Math.hypot(e.x - x, e.z - z) > radius + e.radius || Math.abs(e.y + e.hop - player.y) > 1.7) continue;
       if (distance > .15 && (ex * a.dx + ez * a.dz) / distance < cone) continue;
       if (!combat.unobstructed({ x: player.x, y: player.y + .9, z: player.z }, { x: e.x, y: e.y + .6 + e.hop, z: e.z })) continue;
-      a.hitIds.add(e.id); combat.damageEntity(e, damage, a.dx, a.dz);
+      if (kick && !a.kickPower) {
+        a.kickPower = this.kickPower.roll();
+        this.lastKick = { ...a.kickPower, targetId: e.id, time: combat.time };
+      }
+      const context = kick ? { source: 'kick', kickPower: a.kickPower.id, powerName: a.kickPower.name } : {};
+      a.hitIds.add(e.id); combat.damageEntity(e, kick ? a.kickPower.damage : damage, a.dx, a.dz, context);
       if (offBalance > 0) combat.applyOffBalance(e, offBalance);
       e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);
+      if (kick) combat.launchEntity(e, a.dx, a.dz, a.kickPower);
       hits++;
     }
     return hits;
   }
   impact(player, skill, x = player.x, z = player.z) {
     const a = this.active;
-    this.combat.events.push({ type: 'warrior-impact', skill, x, y: player.y, z, dx: a.dx, dz: a.dz });
+    this.combat.events.push({ type: 'warrior-impact', skill, x, y: terrainHeight(x,z), z, dx: a.dx, dz: a.dz, kickPower: a.kickPower?.id, powerName: a.kickPower?.name });
   }
   update(dt, player) {
     for (const id in this.cooldowns) this.cooldowns[id] = Math.max(0, this.cooldowns[id] - dt);
@@ -98,27 +115,33 @@ export class Warrior {
       return;
     }
     const a = this.active; a.elapsed = Math.min(a.duration, a.elapsed + dt);
+    if (a.id === 'kick') {
+      if (!a.launched && a.elapsed >= .14) { a.launched = true; player.vy = 7.2; player.grounded = false; }
+      if (a.elapsed >= .25 && a.elapsed <= .64) {
+        const hits = this.hitArea(player, { radius: 1.65, damage: 18, cone: .12, stagger: 1.5, offBalance: 4, kick: true });
+        if (hits && !a.hit) { a.hit = true; this.impact(player, 'kick', player.x + a.dx, player.z + a.dz); }
+      }
+      if (this.planted) { this.planted.kicked = true; this.planted.remaining = 3.4; }
+    }
+    if (a.id === 'sweep' && a.elapsed >= .74) this.planted = null;
     if (a.id === 'charge' && a.elapsed < .4 && !a.stopped) {
       if (this.hitArea(player, { radius: 1.2, damage: 8, cone: .4, knock: 1, stagger: .65 })) {
         a.stopped = true; this.impact(player, 'charge');
       }
     }
-    const impactTime = { slam: .51, kick: .42, sweep: .48, slash: .26 }[a.id];
+    const impactTime = { slam: .64, sweep: 1.06, slash: .26 }[a.id];
     if (!a.hit && impactTime !== undefined && a.elapsed >= impactTime) {
       a.hit = true;
       if (a.id === 'slam') {
-        let reach = 1.05;
+        let reach = 1.45;
         const origin = { x: player.x, y: player.y + .5, z: player.z };
-        while (reach > .2 && !this.combat.unobstructed(origin, { x: player.x + a.dx * reach, y: player.y + .5, z: player.z + a.dz * reach })) reach -= .15;
+        while (reach > .2 && !this.combat.unobstructed(origin, { x: player.x + a.dx * (reach+.25), y: player.y + .5, z: player.z + a.dz * (reach+.25) })) reach = Math.max(.2,reach-.15);
         const x = player.x + a.dx * reach, z = player.z + a.dz * reach;
         this.planted = { x, y: Math.max(player.y, terrainHeight(x, z)), z, dx: a.dx, dz: a.dz, remaining: 3.4, kicked: false };
         a.anchor = { ...this.planted };
         this.hitArea(player, { x, z, radius: 1.65, damage: 26, cone: -.1, knock: .6, stagger: 1.65 }); this.impact(player, 'slam', x, z);
-      } else if (a.id === 'kick') {
-        this.hitArea(player, { radius: 3.0, damage: 18, cone: .45, knock: 3.5, stagger: 1.2, offBalance: 4 }); this.impact(player, 'kick', player.x + a.dx * 1.8, player.z + a.dz * 1.8);
-        if (this.planted) { this.planted.kicked = true; this.planted.remaining = 3.0; }
       } else if (a.id === 'sweep') {
-        this.hitArea(player, { radius: 3.5, damage: 38, cone: -.35, knock: 7, stagger: .8 }); this.impact(player, 'sweep'); this.planted = null;
+        this.hitArea(player, { radius: 4.3, damage: 38, cone: -.35, knock: 9, stagger: .9 }); this.impact(player, 'sweep'); this.planted = null;
       } else {
         this.hitArea(player, { radius: 2.7, damage: 24, cone: .25 }); this.impact(player, 'slash');
       }
@@ -132,6 +155,8 @@ export class Warrior {
   state() {
     return { class: 'warrior', activeSkill: this.active?.id ?? null, progress: this.active ? +(this.active.elapsed / this.active.duration).toFixed(3) : 0,
       axePlanted: !!this.planted, followupSeconds: this.planted ? +this.planted.remaining.toFixed(2) : 0, kicked: !!this.planted?.kicked,
+      axeAnchor: this.planted ? { x: +this.planted.x.toFixed(2), y: +this.planted.y.toFixed(2), z: +this.planted.z.toFixed(2) } : null,
+      lastKick: this.lastKick ? { ...this.lastKick } : null,
       queuedSkill: this.queued?.id ?? null, cooldowns: Object.fromEntries(Object.entries(this.cooldowns).map(([id, value]) => [id, +value.toFixed(2)])), executions: { ...this.executions } };
   }
 }

@@ -38,7 +38,7 @@ export class Hunting {
       spots.forEach(([x,z],i)=>this.entities.push({id:`${kind}-${i+1}`,kind,x,z,y:terrainHeight(x,z),homeX:x,homeZ:z,
         hp:kind==='rabbit'?24:72,maxHp:kind==='rabbit'?24:72,radius:kind==='rabbit'?.43:.72,height:kind==='rabbit'?.8:1.3,
         alive:true,respawn:0,heading:i*1.9,brain:1+i*.31,phase:i*2,hop:0,flash:0,windup:0,recovery:0,alert:false,moving:false,
-        knockX:0,knockZ:0,stagger:0,offBalance:0,variant:i%3}));
+        knockX:0,knockZ:0,knockback:null,lastPush:null,stagger:0,offBalance:0,variant:i%3}));
     }
   }
   equip(weapon) {
@@ -48,22 +48,29 @@ export class Hunting {
   }
   restorePlayer() {
     this.cancelDraw();this.warrior.cancel(true);this.hp=100;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
-    this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
+    this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.knockback=null;e.lastPush=null;e.hop=0;e.knockX=e.knockZ=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
   }
   unobstructed(a,b) { return !this.colliders.some(box=>{const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
-  damageEntity(e,damage,dx,dz) {
+  damageEntity(e,damage,dx,dz,context={}) {
     if(!e.alive||damage<=0)return;
     const critical=e.offBalance>0;
     if(critical){damage*=2;e.offBalance=0;this.criticalHits++;}
     e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=dx*4;e.knockZ=dz*4;
-    this.lastHit={targetId:e.id,damage,critical,time:this.time};
-    this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height,z:e.z,damage,critical,kind:e.kind});
-    if(e.hp===0){e.alive=false;e.offBalance=0;e.respawn=e.kind==='rabbit'?13:17;this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});}
+    this.lastHit={targetId:e.id,damage,critical,time:this.time,...context};
+    this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height+e.hop,z:e.z,damage,critical,kind:e.kind,...context});
+    if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});}
   }
   applyOffBalance(e,seconds) {
     if(!e.alive)return;
     e.offBalance=seconds;
     this.events.push({type:'off-balance',id:e.id,x:e.x,y:e.y+e.height,z:e.z});
+  }
+  launchEntity(e,dx,dz,power) {
+    if(!e.alive)return;
+    const length=Math.hypot(dx,dz)||1;
+    e.knockX=e.knockZ=0;e.windup=0;e.stagger=power.duration+1.15;e.recovery=e.stagger;
+    e.knockback={dx:dx/length,dz:dz/length,elapsed:0,...power};
+    e.lastPush={power:power.id,requested:power.distance,travelled:0,blocked:false};
   }
   beginDraw() {
     if(this.weapon!=='bow'||this.hp<=0||this.cooldown>0||this.drawing)return false;
@@ -132,9 +139,22 @@ export class Hunting {
       if(!e.alive){
         e.respawn-=dt;
         if(e.respawn<=0&&Math.hypot(e.homeX-player.x,e.homeZ-player.z)>(e.kind==='slime'?9:4)) {
-          Object.assign(e,{x:e.homeX,z:e.homeZ,y:terrainHeight(e.homeX,e.homeZ),hp:e.maxHp,alive:true,windup:0,recovery:1,knockX:0,knockZ:0,hop:0,stagger:0,offBalance:0});
+          Object.assign(e,{x:e.homeX,z:e.homeZ,y:terrainHeight(e.homeX,e.homeZ),hp:e.maxHp,alive:true,windup:0,recovery:1,knockX:0,knockZ:0,knockback:null,lastPush:null,hop:0,stagger:0,offBalance:0});
           this.events.push({type:'spawn',x:e.x,y:e.y,z:e.z,kind:e.kind});
         }
+        continue;
+      }
+      if(e.knockback){
+        const k=e.knockback,oldProgress=k.elapsed/k.duration;
+        k.elapsed=Math.min(k.duration,k.elapsed+dt);const progress=k.elapsed/k.duration;
+        const travel=k.distance*((1-oldProgress)**3-(1-progress)**3);
+        let moved=0;
+        // Small collision steps keep even the strongest shove outside thin walls.
+        const steps=Math.max(1,Math.ceil(travel/.12));
+        for(let i=0;i<steps;i++){const x=e.x,z=e.z;this.moveEntity(e,k.dx*travel/steps,k.dz*travel/steps);moved+=Math.hypot(e.x-x,e.z-z);}
+        e.lastPush.travelled+=moved;if(moved+1e-4<travel)e.lastPush.blocked=true;
+        e.stagger=Math.max(0,e.stagger-dt);e.moving=false;e.hop=Math.sin(Math.PI*progress)*k.lift;
+        if(progress>=1){e.knockback=null;e.hop=0;}
         continue;
       }
       if(e.stagger>0){e.stagger=Math.max(0,e.stagger-dt);e.hop=0;e.moving=false;this.moveEntity(e,e.knockX*dt,e.knockZ*dt);e.knockX*=Math.exp(-12*dt);e.knockZ*=Math.exp(-12*dt);continue;}

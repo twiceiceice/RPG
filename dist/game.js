@@ -42,7 +42,7 @@ const raycaster = new THREE.Raycaster();
 const input = { x: 0, z: 0, sprint: false };
 const floatingHits = [];
 let hitFeedback = 0;
-let cameraShake = 0;
+let cameraShake = 0, impactPause = 0;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function notify(message) {
@@ -85,6 +85,7 @@ function resetPosition() {
   const reviving = hunting.hp <= 0;
   player.reset(); yaw = .16; pitch = .29; clearInput();
   hunting.restorePlayer(); avatar.root.rotation.y = Math.PI;
+  impactPause = 0;
   $('defeat').hidden = true;
   if (reviving && started) setPaused(false);
   updateCamera(1, true); updateHUD(); notify('시작 위치에서 체력을 회복했어요.');
@@ -296,13 +297,13 @@ function safeCameraPosition(target, candidate) {
 }
 function updateCamera(dt, immediate = false) {
   if (firstPerson) {
-    const a = warrior.active, lift = a?.id === 'kick' ? Math.sin(a.elapsed/a.duration*Math.PI)*.34 : 0;
-    camera.position.set(player.x, player.y + 1.76 + lift, player.z);
-    desired.set(player.x - Math.sin(yaw) * Math.cos(pitch), player.y + 1.76 + lift - Math.sin(pitch), player.z - Math.cos(yaw) * Math.cos(pitch));
+    camera.position.set(player.x, player.y + 1.76, player.z);
+    desired.set(player.x - Math.sin(yaw) * Math.cos(pitch), player.y + 1.76 - Math.sin(pitch), player.z - Math.cos(yaw) * Math.cos(pitch));
     camera.lookAt(desired); return;
   }
   focus.set(player.x, player.y + 1.22, player.z);
-  desired.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(cameraDistance).add(focus);
+  const action = warrior.active, widen = !reduceMotion && action && ['kick','sweep'].includes(action.id) ? Math.sin(action.elapsed/action.duration*Math.PI)*.85 : 0;
+  desired.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(cameraDistance + widen).add(focus);
   const bow = hunting.weapon === 'bow';
   if (bow) { focus.y += .22; desired.y += .22; desired.x += Math.cos(yaw) * .68; desired.z -= Math.sin(yaw) * .68; }
   safeCameraPosition(focus, desired);
@@ -337,10 +338,11 @@ function updateWarriorHUD() {
   $('critical-opening').hidden = !started || !hunting.entities.some(e => e.alive && e.offBalance > 0 && Math.hypot(e.x - player.x, e.z - player.z) < 18);
   const a = warrior.active;
   const progress = a ? a.elapsed / a.duration : 0;
+  const elapsed = a?.elapsed ?? 0;
   const phaseLabels = {
-    charge: '돌파', slam: progress < .35 ? '들어올리기' : progress < .56 ? '내려찍기' : '도끼 고정',
-    kick: progress < .38 ? '도약' : progress < .68 ? '발차기' : '착지',
-    sweep: progress < .23 ? '뽑기' : progress < .73 ? '가로 베기' : '마무리',
+    charge: '돌파', slam: elapsed < .43 ? '날 세우기' : elapsed < .64 ? '내려찍기' : '도끼 고정',
+    kick: elapsed < .14 ? '도약' : elapsed < .70 ? '날아차기' : '착지',
+    sweep: elapsed < .52 ? '뒤로 잡기' : elapsed < .74 ? '뽑기' : elapsed < 1.26 ? '크게 베기' : '마무리',
   };
   for (const skill of WARRIOR_SKILLS) {
     const button = $('skill-' + skill.id), remaining = warrior.cooldowns[skill.id];
@@ -354,9 +356,9 @@ function updateWarriorHUD() {
     $('skill-state-' + skill.id).textContent = active ? phaseLabels[skill.id] : queued ? '다음 동작' : remaining > 0 ? `${remaining.toFixed(1)}초` : usedKick ? '4번으로 마무리' : recoverFirst ? '도끼 회수 후' : needsAxe ? '내려찍기 후' : '준비';
   }
   const name = WARRIOR_SKILLS.find(s => s.id === a?.id)?.name;
-  $('combo-title').textContent = name ?? (a?.id === 'slash' ? '기본 베기' : warrior.planted ? '도끼가 박혔어요' : '양손 도끼 전사');
+  $('combo-title').textContent = a?.id === 'kick' && a.kickPower ? `날아차기 · ${a.kickPower.name} · ${a.kickPower.damage} 피해 / ${a.kickPower.distance}m 밀침` : name ?? (a?.id === 'slash' ? '기본 베기' : warrior.planted ? warrior.planted.kicked ? '뒤에 남은 도끼로 마무리' : '도끼가 박혔어요' : '양손 도끼 전사');
   $('combo-hint').textContent = warrior.queued ? `${WARRIOR_SKILLS.find(s=>s.id===warrior.queued.id).name} 예약됨`
-    : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '4 가로베기를 미리 눌러 마무리', sweep: '도끼를 뽑으며 전방을 크게 베기', slash: '기본 공격 중' }[a.id]
+    : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '뒤의 도끼를 잡으러 돌아가는 중' : elapsed < .74 ? '도끼를 뽑아 몸을 틀기' : '앞으로 파고들며 크게 가로베기', slash: '기본 공격 중' }[a.id]
     : warrior.planted ? `${warrior.planted.kicked ? '4 가로베기' : '3 날아차기 → 4 가로베기'} · ${warrior.planted.remaining.toFixed(1)}초 안에 연계`
     : '1 돌진 → 2 내려찍기 → 3 날아차기 → 4 가로베기';
   $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / 3.4 * 100 : 0}%`;
@@ -381,7 +383,7 @@ function handleCombatEvents() {
   for (const event of hunting.events.splice(0)) {
     if (event.type === 'hit') {
       hitFeedback = event.critical ? .3 : .18;
-      const el = document.createElement('span'); el.className = event.critical ? 'damage-number critical' : 'damage-number'; el.textContent = event.critical ? `치명타 ${event.damage}` : event.damage; $('combat-fx').appendChild(el);
+      const el = document.createElement('span'); el.className = event.critical ? 'damage-number critical' : event.kickPower ? `damage-number kick-${event.kickPower}` : 'damage-number'; el.textContent = event.critical ? `치명타 ${event.damage}` : event.kickPower ? `${event.powerName} · ${event.damage}` : event.damage; $('combat-fx').appendChild(el);
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .25, event.z), life: event.critical ? 1.15 : .85 });
       huntingView.particleBurst(event.critical ? { ...event, kind: 'impact' } : event);
     } else if (event.type === 'off-balance') {
@@ -389,7 +391,8 @@ function handleCombatEvents() {
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .8, event.z), life: 1 });
     } else if (event.type === 'warrior-impact') {
       warriorView.effect(event); huntingView.particleBurst({ ...event, y: event.y + .2, kind: 'impact' });
-      if (!reduceMotion) cameraShake = event.skill === 'slam' ? .065 : .032;
+      impactPause = Math.max(impactPause,event.skill==='slam'?.075:event.skill==='kick'?(event.kickPower==='strong'?.10:.055):event.skill==='sweep'?.065:0);
+      if (!reduceMotion) cameraShake = event.skill === 'slam' ? .13 : event.skill==='kick' ? event.kickPower==='strong'?.15:.09 : event.skill==='sweep'?.10:.032;
     } else if (event.type === 'swing') huntingView.swingEffect(event);
     else if (['defeat', 'impact', 'spawn'].includes(event.type)) huntingView.particleBurst(event);
     else if (event.type === 'player-defeat') { setPaused(true); $('defeat').hidden = false; $('resume').hidden = true; }
@@ -420,7 +423,8 @@ let hudTime = 0;
 function frame(milliseconds) {
   const time = milliseconds * .001, dt = Math.min(time - (previousTime || time), .08); previousTime = time;
   if (!paused) {
-    accumulator += dt;
+    const held = Math.min(impactPause,dt); impactPause -= held;
+    accumulator += dt - held;
     while (accumulator >= 1 / 120) {
       updateInput(1 / 120); player.update(1 / 120, input); hunting.update(1 / 120, player); accumulator -= 1 / 120;
       if (hunting.hp <= 0) break;
@@ -457,13 +461,13 @@ if (modelContext?.registerTool) {
     bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
     warrior: warrior.state(),
     combat: { criticalHits: hunting.criticalHits, lastHit: hunting.lastHit ? { ...hunting.lastHit } : null },
-    creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,offBalanceSeconds:+e.offBalance.toFixed(2),position:{x:+e.x.toFixed(2),y:+e.y.toFixed(2),z:+e.z.toFixed(2)}})),
+    creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,offBalanceSeconds:+e.offBalance.toFixed(2),knockback:e.knockback?{power:e.knockback.id,progress:+(e.knockback.elapsed/e.knockback.duration).toFixed(2)}:null,lastPush:e.lastPush?{...e.lastPush,travelled:+e.lastPush.travelled.toFixed(2)}:null,position:{x:+e.x.toFixed(2),y:+(e.y+e.hop).toFixed(2),z:+e.z.toFixed(2)}})),
   });
   const validateEmpty = value => {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
   };
   const tools = [
-    { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read current position, camera, combat and play state. Includes each creature’s remaining off-balance seconds, critical hit count and the last successful hit.',
+    { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read current position, camera, combat and play state. Includes the planted axe position, last kick power, each creature’s actual knockback distance and remaining off-balance seconds, critical hit count and last successful hit.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute(input) { validateEmpty(input); return state(); } },
@@ -489,7 +493,7 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip a ready axe or sword and resume play. Recover a planted axe with skill 4. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
-    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill, matching keys 1 charge, 2 slam, 3 kick, 4 sweep. Kick and sweep require the axe planted by slam. Kick leaves surviving targets off balance for 4 seconds: the next hit on each target deals double damage once. One valid follow-up can be queued during the current skill. Returns acceptance and actual state; animation and impact advance in real time.',
+    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill, matching keys 1 charge, 2 slam, 3 kick, 4 sweep. Kick and sweep require the axe planted by slam. Kick physically leaps forward and rolls light/medium/strong power once on contact using a drought-reducing pseudo-random distribution: 18/26/36 damage and 3/4.5/6 metre knockback, limited by walls. Surviving targets are off balance for 4 seconds and their next hit takes double damage once. Sweep returns to the planted axe, pulls it out, then lunges forward with a wide cut. One valid follow-up can be queued during the current skill. Returns acceptance and actual state; animation and impact advance in real time.',
       inputSchema: { type: 'object', properties: { skill: { type: 'string', enum: ['charge','slam','kick','sweep'] } }, required: ['skill'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {

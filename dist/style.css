@@ -32,3 +32,5 @@
 .damage-number.critical{font-size:29px;color:#ffcf6b;white-space:nowrap;text-shadow:0 2px 3px #50300e,0 0 12px #442608aa}.damage-number.off-balance{font-size:15px;color:#ffdf8c;white-space:nowrap;text-shadow:0 2px 3px #433017}
 body[data-weapon=axe]:has(#critical-opening:not([hidden])) #toast{bottom:320px}
 @media(max-height:620px){body[data-weapon=axe]:has(#critical-opening:not([hidden])) #toast{bottom:252px}}
+.damage-number.kick-light,.damage-number.kick-medium,.damage-number.kick-strong{white-space:nowrap}.damage-number.kick-medium{font-size:26px;color:#ffe09c}.damage-number.kick-strong{font-size:32px;color:#ffbf68;text-shadow:0 2px 4px #482b13,0 0 14px #6b3d13}
+@media(min-width:961px) and (min-height:621px){body[data-weapon=axe] #toast,body[data-weapon=axe]:has(#critical-opening:not([hidden])) #toast{top:148px;bottom:auto}}
