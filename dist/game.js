@@ -37,6 +37,10 @@ function notify(message) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3600);
 }
 function clearInput() { keys.clear(); touchX = touchZ = 0; dragging = null; $('stick').style.transform = ''; }
+function capturePointer(element, pointerId) {
+  // Embedded browsers can reject capture while pointer lock is changing.
+  try { element.setPointerCapture(pointerId); } catch { /* Dragging still works inside the play area. */ }
+}
 function setPaused(value) {
   paused = value; clearInput(); accumulator = 0;
   $('resume').hidden = !value || !started || $('help-dialog').open;
@@ -107,7 +111,7 @@ world.addEventListener('contextmenu', event => event.preventDefault());
 world.addEventListener('pointerdown', event => {
   if (!started || paused || locked) return;
   dragging = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: 0, type: event.pointerType, button: event.button };
-  world.setPointerCapture(event.pointerId); world.focus();
+  capturePointer(world, event.pointerId); world.focus();
 });
 world.addEventListener('pointermove', event => {
   if (locked || paused || !dragging || event.pointerId !== dragging.id) return;
@@ -115,7 +119,7 @@ world.addEventListener('pointermove', event => {
   dragging.moved += Math.abs(dx) + Math.abs(dy); look(dx, dy);
   dragging.x = event.clientX; dragging.y = event.clientY;
 });
-world.addEventListener('pointerup', event => {
+window.addEventListener('pointerup', event => {
   if (!dragging || event.pointerId !== dragging.id) return;
   const click = dragging.moved < 5 && dragging.type === 'mouse' && dragging.button === 0;
   dragging = null;
@@ -143,7 +147,7 @@ function moveStick(event) {
 }
 joystick.addEventListener('pointerdown', event => {
   if (!started || paused) return;
-  stickPointer = event.pointerId; joystick.setPointerCapture(event.pointerId); moveStick(event);
+  stickPointer = event.pointerId; capturePointer(joystick, event.pointerId); moveStick(event);
 });
 joystick.addEventListener('pointermove', event => { if (event.pointerId === stickPointer) moveStick(event); });
 for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) joystick.addEventListener(type, () => {
