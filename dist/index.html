@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#172e2c">
+  <meta name="description" content="걷고, 달리고, 뛰어오르는 작은 3D 들판. 1인칭과 3인칭으로 자유롭게 움직여 보세요.">
+  <title>바람의 들판 — 자유 이동 놀이터</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23172e2c'/%3E%3Cpath d='M7 23L15 7l10 16H7Z' fill='%23cbe49c'/%3E%3Cpath d='M15 7v16h10Z' fill='%237fb7a2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main id="world" tabindex="0" aria-label="3D 이동 놀이터. WASD 이동, 스페이스 점프, Shift 달리기, V 시점 전환."></main>
+  <header class="hud top">
+    <div class="identity"><span class="mark" aria-hidden="true">△</span><div><h1>바람의 들판</h1><p>자유 이동 놀이터</p></div></div>
+    <nav class="actions" aria-label="게임 조작">
+      <button id="view-button" title="V 키로 시점 전환"><span id="view-label">3인칭</span><kbd>V</kbd></button>
+      <button id="reset-button" class="icon-button" title="시작 위치로 돌아가기 (R)" aria-label="시작 위치로 돌아가기">↺</button>
+      <button id="help-button" class="icon-button" title="조작법" aria-label="조작법 보기">?</button>
+    </nav>
+  </header>
+  <div id="crosshair" aria-hidden="true" hidden></div>
+  <div id="loading" role="status">들판을 불러오는 중…</div>
+  <section id="welcome" class="welcome" hidden aria-label="플레이 시작">
+    <span class="eyebrow">작은 모험의 시작</span>
+    <h2>일단, 걸어 볼까요.</h2>
+    <p>어디로 가든 괜찮아요.<br>마우스로 둘러보고, 자유롭게 움직여 보세요.</p>
+    <button id="play-button" class="primary">들판으로 <span aria-hidden="true">↗</span></button>
+    <small>WASD 이동 · 마우스 시점 · Space 점프</small>
+  </section>
+  <div id="resume" class="resume" hidden><button id="resume-button">계속 걷기 <kbd>클릭</kbd></button></div>
+  <div id="toast" role="status" hidden></div>
+  <footer class="hud bottom">
+    <div class="place"><span class="place-line"></span><div><strong>시작의 들판</strong><span id="motion-state">가만히 서 있는 중</span></div></div>
+    <div class="key-guide" aria-label="주요 조작법"><span><kbd>W A S D</kbd> 이동</span><span><kbd>Space</kbd> 점프</span><span><kbd>Shift</kbd> 달리기</span><span class="mouse-guide">마우스 드래그 · 시점</span></div>
+    <div class="coordinates"><span id="coordinates">0 / 0</span><span>위치</span></div>
+  </footer>
+  <div id="touch-controls" aria-label="터치 조작">
+    <div id="joystick" aria-label="이동 조이스틱"><span id="stick"></span></div>
+    <div class="touch-actions"><button id="touch-run" aria-label="달리기 전환" aria-pressed="false">달리기</button><button id="touch-jump" aria-label="점프">점프</button></div>
+  </div>
+  <dialog id="help-dialog" aria-labelledby="help-title">
+    <div class="dialog-heading"><h2 id="help-title">몸부터 움직여 봐요</h2><button id="close-help" class="icon-button" aria-label="조작법 닫기">×</button></div>
+    <dl><div><dt>이동</dt><dd>W A S D / 방향키</dd></div><div><dt>시점 회전</dt><dd>마우스 드래그 / Q E</dd></div><div><dt>마우스 자유 시점</dt><dd>들판 클릭</dd></div><div><dt>달리기</dt><dd>Shift 누르기</dd></div><div><dt>점프</dt><dd>Space</dd></div><div><dt>1·3인칭 전환</dt><dd>V</dd></div><div><dt>카메라 거리</dt><dd>마우스 휠</dd></div><div><dt>시작 위치</dt><dd>R</dd></div><div><dt>쉬기 / 마우스 해제</dt><dd>Esc</dd></div></dl>
+    <p>돌계단에 올라가거나 나무 사이를 달려 보세요.<br>터치 화면에서는 왼쪽 패드로 이동하고, 오른쪽 화면을 밀어 둘러보세요.</p>
+  </dialog>
+  <script type="module" src="./game.js"></script>
+  <noscript>이 놀이터를 실행하려면 JavaScript를 켜 주세요.</noscript>
+</body>
+</html>
