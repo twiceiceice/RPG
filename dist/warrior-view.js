@@ -1,4 +1,5 @@
 import * as THREE from './vendor/three.module.js';
+import { SPIN } from './warrior.js';
 
 const Y = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), midpoint = new THREE.Vector3();
 const ease = t => { t = THREE.MathUtils.clamp(t, 0, 1); return t * t * (3 - 2 * t); };
@@ -66,6 +67,16 @@ export class WarriorView {
     this.trailGeometry.setAttribute('position',new THREE.BufferAttribute(this.trailVertices,3));
     this.trail = new THREE.Mesh(this.trailGeometry,new THREE.MeshBasicMaterial({color:0xffdb8b,transparent:true,opacity:.38,side:THREE.DoubleSide,depthWrite:false}));
     this.trail.frustumCulled=false;this.trail.visible=false;scene.add(this.trail);
+    this.spinVfx = new THREE.Group(); scene.add(this.spinVfx); this.spinVfx.visible = false;
+    this.spinRings = Array.from({length:3},(_,i)=>{
+      const ring = mesh(this.spinVfx,new THREE.RingGeometry(2.65+i*.12,SPIN.radius,64,1,0,Math.PI*1.45),new THREE.MeshBasicMaterial({color:0xffd782,transparent:true,opacity:.35,side:THREE.DoubleSide,depthWrite:false}),0,.35+i*.4,0);
+      ring.rotation.x = -Math.PI/2; ring.castShadow=false; return ring;
+    });
+    this.windLines = Array.from({length:6},(_,i)=>{
+      const points = Array.from({length:36},(_,j)=>{const p=j/35,r=SPIN.pullRadius-(SPIN.pullRadius-1.3)*p,angle=p*Math.PI*1.2;return new THREE.Vector3(Math.cos(angle)*r,.12+p*.95,Math.sin(angle)*r);});
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:0xb2fff1,transparent:true,opacity:.48,depthWrite:false}));
+      line.rotation.y=i*Math.PI/3;this.spinVfx.add(line);return line;
+    });
     this.rig.visible = this.firstRig.visible = this.armor.visible = false;
   }
   placeLocal(player, dx, dz, x, y, z, rx, ry, rz, roll = 0) {
@@ -119,6 +130,13 @@ export class WarriorView {
         avatar.body.rotation.y=mix(-wind+swing*2.15,0,recover);
         avatar.body.rotation.z=-.13*Math.sin(swing*Math.PI);avatar.body.position.y=-.10*Math.sin(swing*Math.PI);
         avatar.legs[0].rotation.x=-.30*Math.sin(swing*Math.PI);avatar.legs[1].rotation.x=.22*Math.sin(swing*Math.PI);
+      } else if (id === 'spin') {
+        const turn=elapsed*Math.PI*5, wind=ease(elapsed/.14), settle=ease((elapsed-(a.duration-.14))/.14);
+        const spinAngle=angle+turn;
+        avatar.body.rotation.y=turn; avatar.body.position.y=-.12*wind*(1-settle); avatar.body.rotation.x=0;
+        avatar.legs[0].rotation.x=.18;avatar.legs[1].rotation.x=-.18;
+        avatar.legs[0].rotation.z=.13;avatar.legs[1].rotation.z=-.13;
+        this.placeLocal(player,Math.sin(spinAngle),Math.cos(spinAngle),-.10,1.03,.42,Math.PI/2,-.6,0);
       } else if (id === 'slash') {
         const swing = Math.sin(t*Math.PI), arc = -1.2+ease(t)*2.4;
         this.placeLocal(player,dx,dz,-.15,.70+swing*.30,.30,mix(.17,1.40,swing),arc*swing,mix(-.42,0,swing));
@@ -148,8 +166,18 @@ export class WarriorView {
       this.camera.getWorldQuaternion(this.cameraRotation);this.firstAxe.quaternion.copy(this.cameraRotation.invert()).multiply(this.axe.quaternion);
       if (id==='slam') this.firstAxe.position.set(.25*(1-ease(elapsed/.43)),-.68+ease(elapsed/.43)*.27,-1.34);
       if (id==='sweep') this.firstAxe.position.set(.15-Math.sin(ease((elapsed-.74)/.48)*Math.PI)*.40,-.48,-1.35);
+      if (id==='spin') { this.firstAxe.position.set(Math.sin(elapsed*Math.PI*5)*.46,-.78,-1.36); this.firstAxe.scale.setScalar(.54); }
       this.firstBoots.forEach((boot,i)=>{boot.visible=id==='kick';boot.position.set((i?1:-1)*.20,-.70+flight*.64,-.68-flight*.40);boot.rotation.x=-flight*.45;});
     }
+    const spin = w.active?.id === 'spin' ? w.active : null;
+    this.spinVfx.visible = equipped && !!spin;
+    if (spin) {
+      this.spinVfx.position.set(player.x,player.y,player.z);this.spinVfx.rotation.y=spin.elapsed*Math.PI*4;
+      const fade=Math.min(1,spin.elapsed/.12,(spin.duration-spin.elapsed)/.15), color=spin.stage===2?0x88f5e2:0xffd782;
+      this.spinRings.forEach((ring,i)=>{ring.rotation.z=i*2.1-spin.elapsed*(i+1);ring.material.color.setHex(color);ring.material.opacity=fade*(.25+i*.055);});
+      this.windLines.forEach(line=>{line.visible=spin.stage===2;line.material.opacity=fade*.55;});
+      this.trail.material.color.setHex(color);
+    } else this.trail.material.color.setHex(0xffdb8b);
     this.updateTrail(dt,paused,firstPerson,equipped);
     for (const e of this.effects) {
       if (!paused) e.life -= dt;
@@ -163,7 +191,7 @@ export class WarriorView {
     const a=this.warrior.active,elapsed=a?.elapsed??0;
     if(!paused){
       this.trailSamples=this.trailSamples.filter(s=>(s.life-=dt)>0);
-      if(equipped&&((a?.id==='slam'&&elapsed>.43&&elapsed<.69)||(a?.id==='sweep'&&elapsed>.74&&elapsed<1.26)||(a?.id==='slash'&&elapsed>.14&&elapsed<.42))){
+      if(equipped&&(a?.id==='spin'||(a?.id==='slam'&&elapsed>.43&&elapsed<.69)||(a?.id==='sweep'&&elapsed>.74&&elapsed<1.26)||(a?.id==='slash'&&elapsed>.14&&elapsed<.42))){
         this.axe.updateMatrixWorld(true);
         this.trailSamples.push({outer:this.axe.localToWorld(new THREE.Vector3(-.72,1.65,0)),inner:this.axe.localToWorld(new THREE.Vector3(0,.85,0)),life:.17});
         if(this.trailSamples.length>24)this.trailSamples.shift();

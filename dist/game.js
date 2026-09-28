@@ -65,7 +65,7 @@ async function lockMouse() {
     if (!renderer.domElement.requestPointerLock) throw new Error('unsupported');
     await renderer.domElement.requestPointerLock();
   } catch {
-    notify('우클릭 드래그로 시점 회전 · 1~4 전사 기술 · 좌클릭 기본 공격');
+    notify('우클릭 드래그로 시점 회전 · 1~4 연계 · 5 궁극기 · 좌클릭 기본 공격');
   }
 }
 function play() {
@@ -100,7 +100,7 @@ function equipWeapon(weapon) {
     $(id).classList.toggle('selected', selected); $(id).setAttribute('aria-pressed', String(selected));
   }
   $('weapon-name').textContent = axe ? '양손 도끼' : bow ? '들판의 활' : '여행자의 칼';
-  $('weapon-hint').textContent = axe ? '좌클릭 / F 기본 공격 · 1~4 기술' : bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '클릭 / F · 가까이서 베기';
+  $('weapon-hint').textContent = axe ? '좌클릭 / F 기본 공격 · 1~5 기술' : bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '클릭 / F · 가까이서 베기';
   $('warrior-hud').hidden = !axe;
   $('touch-attack').textContent = bow ? '당기기' : '공격';
   $('touch-attack').setAttribute('aria-label', bow ? '누르고 활 당기기, 놓으면 발사' : axe ? '도끼 기본 공격' : '칼로 공격');
@@ -162,7 +162,7 @@ document.addEventListener('pointerlockchange', () => {
   if (wasLocked && !locked) setPaused(true);
 });
 document.addEventListener('pointerlockerror', () => {
-  if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~4 전사 기술');
+  if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~4 연계 · 5 궁극기');
 });
 document.addEventListener('keydown', event => {
   if ($('help-dialog').open) return;
@@ -302,7 +302,7 @@ function updateCamera(dt, immediate = false) {
     camera.lookAt(desired); return;
   }
   focus.set(player.x, player.y + 1.22, player.z);
-  const action = warrior.active, widen = !reduceMotion && action && ['kick','sweep'].includes(action.id) ? Math.sin(action.elapsed/action.duration*Math.PI)*.85 : 0;
+  const action = warrior.active, widen = !reduceMotion && action ? action.id==='spin' ? Math.min(1,action.elapsed/.2,(action.duration-action.elapsed)/.2)*1.3 : ['kick','sweep'].includes(action.id) ? Math.sin(action.elapsed/action.duration*Math.PI)*.85 : 0 : 0;
   desired.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(cameraDistance + widen).add(focus);
   const bow = hunting.weapon === 'bow';
   if (bow) { focus.y += .22; desired.y += .22; desired.x += Math.cos(yaw) * .68; desired.z -= Math.sin(yaw) * .68; }
@@ -343,7 +343,16 @@ function updateWarriorHUD() {
     charge: '돌파', slam: elapsed < .43 ? '날 세우기' : elapsed < .64 ? '내려찍기' : '도끼 고정',
     kick: elapsed < .14 ? '도약' : elapsed < .70 ? '날아차기' : '착지',
     sweep: elapsed < .52 ? '끌어오기' : elapsed < .74 ? '도끼 잡기' : elapsed < 1.26 ? '크게 베기' : '마무리',
+    spin: `${a?.stage ?? 1}단계 · ${Math.max(0,(a?.duration ?? 0)-elapsed).toFixed(1)}초`,
   };
+  const ready = warrior.ultimate.ready, combo = warrior.combo, spinning = a?.id === 'spin';
+  $('ultimate-info').classList.toggle('ready', ready); $('ultimate-info').classList.toggle('empowered', spinning && a.stage===2);
+  $('ultimate-charge').max = spinning ? a.duration : 4;
+  $('ultimate-charge').value = spinning ? a.duration-elapsed : ready ? 4 : combo.step;
+  $('ultimate-charge').setAttribute('aria-label', spinning ? '회전베기 남은 시간' : '궁극기 연계 진행');
+  $('ultimate-status').textContent = spinning ? `${a.stage}단계 ${a.stage===2?'흡입 회전':'회전베기'} · ${(a.duration-elapsed).toFixed(1)}초${a.extended>0?` · +${a.extended.toFixed(2)}초`:''}`
+    : ready ? '궁극기 준비 완료 · 5 회전베기' : combo.step ? `연계 ${combo.step}/4 적중 · 다음 ${combo.step+1}${combo.remaining>0?` · ${combo.remaining.toFixed(1)}초`:''}`
+    : combo.failure ? `${combo.failure} · 1번부터 다시` : '궁극기 연계 · 1 → 2 → 3 → 4 적중';
   for (const skill of WARRIOR_SKILLS) {
     const button = $('skill-' + skill.id), remaining = warrior.cooldowns[skill.id];
     const needsAxe = ['kick','sweep'].includes(skill.id) && !warrior.planted;
@@ -351,14 +360,15 @@ function updateWarriorHUD() {
     const recoverFirst = ['charge','slam'].includes(skill.id) && warrior.planted;
     const active = a?.id === skill.id, queued = warrior.queued?.id === skill.id;
     button.classList.toggle('active', active); button.classList.toggle('queued', queued);
-    button.classList.toggle('unavailable', remaining > 0 || needsAxe || usedKick || recoverFirst);
-    button.style.setProperty('--cooldown', `${remaining / skill.cooldown * 100}%`);
-    $('skill-state-' + skill.id).textContent = active ? phaseLabels[skill.id] : queued ? '다음 동작' : remaining > 0 ? `${remaining.toFixed(1)}초` : usedKick ? '4번으로 마무리' : recoverFirst ? '도끼 회수 후' : needsAxe ? '내려찍기 후' : '준비';
+    button.classList.toggle('unavailable', remaining > 0 || needsAxe || usedKick || recoverFirst || (skill.id==='spin'&&!ready&&!active));
+    button.classList.toggle('ready', skill.id==='spin' && ready);button.classList.toggle('empowered', active && spinning && a.stage===2);
+    button.style.setProperty('--cooldown', `${skill.cooldown ? remaining / skill.cooldown * 100 : 0}%`);
+    $('skill-state-' + skill.id).textContent = active ? phaseLabels[skill.id] : queued ? '다음 동작' : skill.id==='spin' ? ready ? '사용 가능' : `${combo.step}/4 적중` : remaining > 0 ? `${remaining.toFixed(1)}초` : usedKick ? '4번으로 마무리' : recoverFirst ? '도끼 회수 후' : needsAxe ? '내려찍기 후' : '준비';
   }
   const name = WARRIOR_SKILLS.find(s => s.id === a?.id)?.name;
   $('combo-title').textContent = a?.id === 'kick' && a.kickPower ? `날아차기 · ${a.kickPower.name} · ${a.kickPower.damage} 피해 / ${a.kickPower.distance}m 밀침` : name ?? (a?.id === 'slash' ? '기본 베기' : warrior.planted ? warrior.planted.kicked ? '뒤에 남은 도끼로 마무리' : '도끼가 박혔어요' : '양손 도끼 전사');
   $('combo-hint').textContent = warrior.queued ? `${WARRIOR_SKILLS.find(s=>s.id===warrior.queued.id).name} 예약됨`
-    : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '현재 위치에서 도끼를 끌어오기' : elapsed < .74 ? '도끼를 잡아 몸을 틀기' : '앞으로 파고들며 크게 가로베기', slash: '기본 공격 중' }[a.id]
+    : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '현재 위치에서 도끼를 끌어오기' : elapsed < .74 ? '도끼를 잡아 몸을 틀기' : '앞으로 파고들며 크게 가로베기', slash: '기본 공격 중', spin: a.stage===2 ? `끌어당기는 중 · 연속 ${a.streak}/3 · 다음 치명타까지 ${3-a.streak}회` : `연속 ${a.streak}/3 적중 → 흡입 강화 · WASD 이동` }[a.id]
     : warrior.planted ? `${warrior.planted.kicked ? '4 가로베기' : '3 날아차기 → 4 가로베기'} · ${warrior.planted.remaining.toFixed(1)}초 안에 연계`
     : '1 돌진 → 2 내려찍기 → 3 날아차기 → 4 가로베기';
   $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / 3.4 * 100 : 0}%`;
@@ -393,6 +403,11 @@ function handleCombatEvents() {
       warriorView.effect(event); huntingView.particleBurst({ ...event, y: event.y + .2, kind: 'impact' });
       impactPause = Math.max(impactPause,event.skill==='slam'?.075:event.skill==='kick'?(event.kickPower==='strong'?.10:.055):event.skill==='sweep'?.065:0);
       if (!reduceMotion) cameraShake = event.skill === 'slam' ? .13 : event.skill==='kick' ? event.kickPower==='strong'?.15:.09 : event.skill==='sweep'?.10:.032;
+    } else if (event.type === 'ultimate-ready') notify('4연계 성공! 5번 회전베기를 사용할 수 있어요.');
+    else if (event.type === 'spin-stage') { notify('회전베기 2단계 · 주변 적을 끌어당겨요!'); if(!reduceMotion) cameraShake=.07; }
+    else if (event.type === 'spin-pulse' && event.extension>0) {
+      const el=document.createElement('span');el.className='damage-number spin-extension';el.textContent=`+${event.extension.toFixed(2)}초`;$('combat-fx').appendChild(el);
+      floatingHits.push({el,position:new THREE.Vector3(event.x+.7,event.y+2.6,event.z),life:.6});
     } else if (event.type === 'swing') huntingView.swingEffect(event);
     else if (['defeat', 'impact', 'spawn'].includes(event.type)) huntingView.particleBurst(event);
     else if (event.type === 'player-defeat') { setPaused(true); $('defeat').hidden = false; $('resume').hidden = true; }
@@ -467,7 +482,7 @@ if (modelContext?.registerTool) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
   };
   const tools = [
-    { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read current position, camera, combat and play state. Includes the planted axe position, last kick power, each creature’s actual knockback distance and remaining off-balance seconds, critical hit count and last successful hit.',
+    { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read position, combat, combo progress and failure, ultimate readiness, spin stage, remaining time and last spin statistics. Also includes the planted axe, kick power, creature knockback and off-balance seconds, critical count and last successful hit.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute(input) { validateEmpty(input); return state(); } },
@@ -493,11 +508,11 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip a ready axe or sword and resume play. Recover a planted axe with skill 4. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
-    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill, matching keys 1 charge, 2 slam, 3 kick, 4 sweep. Kick and sweep require the axe planted by slam. Kick physically leaps forward and rolls light/medium/strong power once on contact using a drought-reducing pseudo-random distribution: 18/26/36 damage and 3/4.5/6 metre knockback, limited by walls. Surviving targets are off balance for 4 seconds and their next hit takes double damage once. Sweep recalls the planted axe to the current position without moving backward, then lunges forward with a wide cut. One valid follow-up can be queued during the current skill. Returns acceptance and actual state; animation and impact advance in real time.',
-      inputSchema: { type: 'object', properties: { skill: { type: 'string', enum: ['charge','slam','kick','sweep'] } }, required: ['skill'], additionalProperties: false },
+    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill: 1 charge, 2 slam, 3 kick, 4 sweep, 5 spin ultimate. Kick and sweep need the planted axe. Kick leaps forward, rolling light/medium/strong PRD power: 18/26/36 damage, 3/4.5/6m knockback. Targets become off balance for one double-damage hit within 4 seconds. Sweep recalls the axe without retreating and lunges forward. Landing charge, slam, kick, sweep in order stores one spin. Misses, wrong order, weapon switching, axe retrieval, or waiting over 3 seconds after a skill ends break an unfinished combo. Rejected inputs and taking damage do not. Spin lasts 2.5s, hits all directions every .25s, and allows movement. Every third consecutive connected pulse is 2x critical; the first such pulse upgrades to stage 2, pulling nearby visible enemies inward. A missed pulse resets the streak. Critical pulses add .25s once each, kills add .5s each, total duration caps at 4s. No damage or pull through walls. One valid follow-up may be queued. Returns actual state; actions advance in real time.',
+      inputSchema: { type: 'object', properties: { skill: { type: 'string', enum: ['charge','slam','kick','sweep','spin'] } }, required: ['skill'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {
-        if (!input || !WARRIOR_SKILLS.some(s=>s.id===input.skill) || Object.keys(input).some(k=>k!=='skill')) throw new Error('skill must be charge, slam, kick or sweep.');
+        if (!input || !WARRIOR_SKILLS.some(s=>s.id===input.skill) || Object.keys(input).some(k=>k!=='skill')) throw new Error('skill must be charge, slam, kick, sweep or spin.');
         const result = useWarriorSkill(input.skill, false); if (!result.accepted) throw new Error(result.reason); return { ...result, ...state() };
       } },
     { name: 'begin_bow_draw', title: '활 당기기', description: 'Begin holding the equipped bow, matching left mouse down or F down. Hold up to 1.05 seconds for full power. Does not fire until release_bow_draw.',

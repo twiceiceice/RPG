@@ -4,13 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#172e2c">
-  <meta name="description" content="양손 도끼 전사의 들판. 돌진, 내려찍기, 날아차기, 가로베기를 연결하며 토끼와 슬라임을 사냥하세요.">
+  <meta name="description" content="양손 도끼 전사의 들판. 네 기술을 적중시켜 궁극기 회전베기를 열고, 적을 끌어당기며 사냥하세요.">
   <title>바람의 들판 — 양손 도끼 전사</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23172e2c'/%3E%3Cpath d='M7 23L15 7l10 16H7Z' fill='%23cbe49c'/%3E%3Cpath d='M15 7v16h10Z' fill='%237fb7a2'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
 </head>
 <body>
-  <main id="world" tabindex="0" aria-label="3D 사냥 들판. WASD 이동, Space 점프, 1 돌진, 2 내려찍기, 3 날아차기, 4 가로베기. Z 도끼, X 칼, C 활. 좌클릭 또는 F 기본 공격, V 시점 전환."></main>
+  <main id="world" tabindex="0" aria-label="3D 사냥 들판. WASD 이동, Space 점프, 1 돌진, 2 내려찍기, 3 날아차기, 4 가로베기, 5 궁극기 회전베기. Z 도끼, X 칼, C 활. 좌클릭 또는 F 기본 공격, V 시점 전환."></main>
   <header class="hud top">
     <div class="identity"><span class="mark" aria-hidden="true">△</span><div><h1>바람의 들판</h1><p>전사의 첫걸음</p></div></div>
     <nav class="actions" aria-label="게임 조작">
@@ -35,7 +35,7 @@
     <h2>내려찍고, 날아차고.</h2>
     <p>날을 세워 내려찍고,<br>앞으로 날아가 적을 밀쳐내기.<br>도끼를 끌어와 크게 가로베기.</p>
     <button id="play-button" class="primary">사냥 시작 <span aria-hidden="true">↗</span></button>
-    <small>기술 1 → 2 → 3 → 4 · 좌클릭 기본 공격</small>
+    <small>1 → 2 → 3 → 4 적중 · 5 회전베기</small>
   </section>
   <div id="resume" class="resume" hidden><button id="resume-button">계속 걷기 <kbd>클릭</kbd></button></div>
   <div id="toast" role="status" hidden></div>
@@ -44,6 +44,7 @@
   </section>
   <section id="warrior-hud" aria-label="전사 기술">
     <div id="critical-opening" hidden>✦ 비틀거리는 적 · 다음 적중은 치명타 ×2</div>
+    <div id="ultimate-info" class="ultimate-info"><span id="ultimate-status">궁극기 연계 · 0/4 적중</span><progress id="ultimate-charge" max="4" value="0" aria-label="궁극기 연계 진행"></progress></div>
     <div class="combo-info"><strong id="combo-title">양손 도끼 전사</strong><span id="combo-hint">1 돌진 → 2 내려찍기 → 3 날아차기 → 4 가로베기</span></div>
     <div class="combo-track"><span id="combo-progress"></span></div>
     <div class="skill-bar">
@@ -51,6 +52,7 @@
       <button id="skill-slam" class="skill-slot" aria-label="2 내려찍기" title="2 · 도끼 날을 세워 땅에 꽂기"><kbd>2</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M18 4v20m-6-6 6 6 6-6M4 29l8-3 6 5 6-5 8 3"/></svg><strong>내려찍기</strong><span id="skill-state-slam">준비</span></button>
       <button id="skill-kick" class="skill-slot" aria-label="3 날아차기" title="3 · 앞으로 날아차기. 약·중·강에 따라 18·26·36 피해, 3·4.5·6m 밀침. 다음 적중 1회는 2배 피해"><kbd>3</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M8 31V8m-4 3 8-5M8 17l12-5 4 7 8-7M20 12l-1 12 10 4"/><circle cx="22" cy="6" r="2"/></svg><strong>날아차기</strong><span id="skill-state-kick">내려찍기 후</span></button>
       <button id="skill-sweep" class="skill-slot" aria-label="4 가로베기" title="4 · 현재 위치에서 도끼를 끌어와, 앞으로 파고들며 크게 가로베기"><kbd>4</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M5 23Q18 4 32 14M24 7l8 7-9 3M7 30 23 14M7 23q10-9 19-2"/></svg><strong>가로베기</strong><span id="skill-state-sweep">내려찍기 후</span></button>
+      <button id="skill-spin" class="skill-slot ultimate-slot unavailable" aria-label="5 궁극기 회전베기" title="5 · 1~4 순서대로 적중하면 준비. 2.5초 전방향 공격, 3회 연속 적중 시 흡입 강화. 치명타와 처치로 최대 4초까지 연장"><kbd>5</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M29 12A13 13 0 1 0 30 24M29 5v8h-8M22 15a6 6 0 1 0 1 8"/></svg><strong>회전베기</strong><span id="skill-state-spin">0/4 적중</span></button>
     </div>
   </section>
   <div class="weapon-bar" aria-label="무기 선택">
@@ -70,8 +72,11 @@
   </div>
   <dialog id="help-dialog" aria-labelledby="help-title">
     <div class="dialog-heading"><h2 id="help-title">들판에서 살아남기</h2><button id="close-help" class="icon-button" aria-label="조작법 닫기">×</button></div>
-    <dl><div><dt>이동</dt><dd>W A S D / 방향키</dd></div><div><dt>시점 회전</dt><dd>우클릭 드래그 / Q E</dd></div><div><dt>전사 기술</dt><dd>1 돌진 · 2 내려찍기<br>3 날아차기 · 4 가로베기</dd></div><div><dt>도끼 / 칼 / 활</dt><dd>Z / X / C</dd></div><div><dt>기본 공격</dt><dd>좌클릭 / F</dd></div><div><dt>달리기 / 점프</dt><dd>Shift / Space</dd></div><div><dt>1·3인칭 전환</dt><dd>V</dd></div><div><dt>카메라 거리</dt><dd>마우스 휠</dd></div><div><dt>위치·체력 회복</dt><dd>R</dd></div><div><dt>쉬기 / 마우스 해제</dt><dd>Esc</dd></div></dl>
+    <dl><div><dt>이동</dt><dd>W A S D / 방향키</dd></div><div><dt>시점 회전</dt><dd>우클릭 드래그 / Q E</dd></div><div><dt>전사 기술</dt><dd>1 돌진 · 2 내려찍기<br>3 날아차기 · 4 가로베기<br>5 궁극기 회전베기</dd></div><div><dt>도끼 / 칼 / 활</dt><dd>Z / X / C</dd></div><div><dt>기본 공격</dt><dd>좌클릭 / F</dd></div><div><dt>달리기 / 점프</dt><dd>Shift / Space</dd></div><div><dt>1·3인칭 전환</dt><dd>V</dd></div><div><dt>카메라 거리</dt><dd>마우스 휠</dd></div><div><dt>위치·체력 회복</dt><dd>R</dd></div><div><dt>쉬기 / 마우스 해제</dt><dd>Esc</dd></div></dl>
     <p>내려찍기로 도끼를 박으면 날아차기와 가로베기를 쓸 수 있어요. 다음 기술을 미리 한 번 눌러 동작을 이어 보세요. 가만히 있으면 약 3초간 연계할 수 있고, 이동·점프·무기 변경으로 도끼를 회수할 수 있어요. 아래 기술 버튼을 직접 눌러도 됩니다.</p>
+    <p><strong>5 · 궁극기 회전베기</strong><br>1 → 2 → 3 → 4를 순서대로 각각 적에게 맞히면 궁극기가 준비돼요. 대상이 달라도 되고, 약·중·강 발차기 모두 인정돼요. 빗나감, 순서 변경, 기술 종료 후 3초 초과, 도끼 회수·무기 변경은 진행 중인 연계를 끊어요. 발동되지 않은 키 입력과 단순 피격은 괜찮아요. 준비된 궁극기는 이동·피격·무기 변경에도 보관되고, 사망·R로 초기화돼요.</p>
+    <p>회전베기는 <strong>기본 2.5초</strong> 동안 이동하며 주변을 0.25초마다 공격해요. 1단계는 8 피해, <strong>3회 연속 적중하면 2단계</strong>로 강화돼 6m 안의 적을 끌어당기며 10 피해를 줍니다. 공격 범위는 3.2m이며 벽 너머는 공격하거나 당기지 않아요. 한 번에 여러 적을 맞혀도 연속 적중은 1회로 세고, 빗나가면 연속 횟수가 초기화돼요.</p>
+    <p><strong>매 3번째 연속 적중은 치명타 · 2배 피해.</strong> 기존 비틀거림과 중복해 4배가 되지는 않아요. 치명타가 난 회전 공격 1회당 +0.25초, 처치한 적 1마리당 +0.5초를 얻으며 전체 지속시간은 <strong>최대 4초</strong>예요. 2단계는 빗나가도 유지되고, 다시 쓰려면 4연계를 새로 성공해야 해요.</p>
     <p>날아차기는 도끼를 짚고 앞으로 약 3m 날아가요. 적중할 때 약·중·강이 정해지며 각각 <strong>18·26·36 피해 / 3·4.5·6m 밀침</strong>을 줍니다. 강한 발차기가 오래 안 나오면 나올 확률이 높아져요. 빗나간 공격은 이 확률을 바꾸지 않고, 장애물에 막히면 밀리는 거리가 줄어요. 4번을 누르면 현재 위치에서 도끼를 끌어와 앞으로 크게 베어요.</p>
     <p>날아차기에 맞은 적은 4초간 비틀거려요. 머리 위에 금빛 표시가 있는 동안 그 적에게 다음 공격을 맞히면 <strong>한 번만 치명타 · 2배 피해</strong>가 들어갑니다. 가로베기뿐 아니라 기본 공격·칼·화살도 가능해요. 빗나가도 기회가 사라지지 않지만, 4초가 지나면 끝나요.</p>
     <p>활은 좌클릭 또는 F를 누르고 당긴 뒤, 놓으면 발사해요. 약 1초간 가득 당기면 더 빠르고 강하게 날아가요. 당기는 동안에도 화면 중앙으로 조준할 수 있고, 화살은 무제한이에요. 무기 변경이나 일시정지로 당기기를 취소할 수 있어요.<br>슬라임은 가까워지면 공격해요. 6초 동안 맞지 않으면 체력이 회복돼요. 사냥한 대상은 잠시 뒤 다시 나타나요.<br>터치: 왼쪽 패드 이동 · 오른쪽 화면 시점 · 당기기 버튼을 누르고 있다 놓아 발사</p>

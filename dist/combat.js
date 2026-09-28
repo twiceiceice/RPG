@@ -53,12 +53,13 @@ export class Hunting {
   unobstructed(a,b) { return !this.colliders.some(box=>{const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
   damageEntity(e,damage,dx,dz,context={}) {
     if(!e.alive||damage<=0)return;
-    const critical=e.offBalance>0;
+    const critical=e.offBalance>0||context.forceCritical===true;
     if(critical){damage*=2;e.offBalance=0;this.criticalHits++;}
     e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=dx*4;e.knockZ=dz*4;
     this.lastHit={targetId:e.id,damage,critical,time:this.time,...context};
     this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height+e.hop,z:e.z,damage,critical,kind:e.kind,...context});
     if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});}
+    return { damage, critical, killed: !e.alive };
   }
   applyOffBalance(e,seconds) {
     if(!e.alive)return;
@@ -115,7 +116,7 @@ export class Hunting {
     if(this.hp<=0||this.invincible>0)return false;
     this.hp=Math.max(0,this.hp-amount);this.invincible=.65;this.hurt=.32;this.sinceHit=0;
     this.events.push({type:'hurt',damage:amount});
-    if(this.hp===0){this.cancelDraw();this.warrior.cancel();this.events.push({type:'player-defeat'});}
+    if(this.hp===0){this.cancelDraw();this.warrior.cancel(false,true);this.events.push({type:'player-defeat'});}
     return true;
   }
   moveEntity(e,dx,dz) {
