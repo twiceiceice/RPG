@@ -10,7 +10,7 @@ function mesh(geometry, material, x, y, z, parent) {
   parent.add(object); return object;
 }
 export function createEnvironment(scene) {
-  const colliders = [], cameraSurfaces = [];
+  const colliders = [], cameraSurfaces = [], trees = [];
   let seed = 47;
   const random = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
   scene.background = new THREE.Color(0xb1d6d7);
@@ -57,19 +57,29 @@ export function createEnvironment(scene) {
 
   const treeTrunk = new THREE.CylinderGeometry(.18, .29, 2.8, 6);
   const crown = new THREE.ConeGeometry(1.65, 3.6, 7);
-  const treeSpots = [];
+  function plantTree(x, z, scale, variant) {
+    const y = terrainHeight(x,z), id = `tree-${trees.length+1}`;
+    const root = new THREE.Group(); root.position.set(x,y,z); scene.add(root);
+    const trunk = mesh(treeTrunk, bark, 0, 1.4*scale, 0, root); trunk.scale.setScalar(scale);
+    trunk.userData.entityId = id;
+    for (let level = 0; level < 3; level++) {
+      const foliage = mesh(crown, pine[(variant+level)%pine.length], 0, (3.9+level*1.05)*scale, 0, root);
+      foliage.scale.setScalar(scale*(1-level*.19)); foliage.rotation.y = variant;
+    }
+    const collider = { minX:x-.25*scale,maxX:x+.25*scale,minZ:z-.25*scale,maxZ:z+.25*scale,bottom:y,top:y+2.8*scale,active:true,treeId:id };
+    trunk.userData.collider=collider;
+    colliders.push(collider); cameraSurfaces.push(trunk);
+    trees.push({id,x,y,z,scale,root,trunk,collider});
+  }
+  // A small grove beside the starting field makes lumbering easy to discover.
+  plantTree(-4, 3, 1, 0); plantTree(-6.3, 1.7, 1.25, 1); plantTree(-7.2, 5, 1.1, 2);
   for (let i = 0; i < 85; i++) {
     const angle = random() * Math.PI * 2, radius = 13 + random() * 61;
     const x = Math.cos(angle) * radius, z = Math.sin(angle) * radius;
     if (Math.abs(x - Math.sin(z * .08) * 3.5) < 6 || (x < -4 && x > -12 && z < 0 && z > -20)) continue;
-    const scale = .8 + random() * .75, y = terrainHeight(x, z);
-    const trunk = mesh(treeTrunk, bark, x, y + 1.4 * scale, z, scene); trunk.scale.setScalar(scale);
-    for (let level = 0; level < 3; level++) {
-      const foliage = mesh(crown, pine[(i + level) % pine.length], x, y + (3 + level * 1.05) * scale, z, scene);
-      foliage.scale.setScalar(scale * (1 - level * .19)); foliage.rotation.y = i;
-    }
-    colliders.push({ minX: x - .25 * scale, maxX: x + .25 * scale, minZ: z - .25 * scale, maxZ: z + .25 * scale, bottom: y, top: y + 5 * scale });
-    cameraSurfaces.push(trunk); treeSpots.push({ x, z });
+    const scale = .8 + random() * .75;
+    if (trees.some(t=>Math.hypot(t.x-x,t.z-z)<2.6)) continue;
+    plantTree(x,z,scale,i);
   }
 
   for (let i = 0; i < 24; i++) {
@@ -119,7 +129,7 @@ export function createEnvironment(scene) {
     }
     cloud.position.set((random() - .5) * 170, 27 + random() * 17, (random() - .5) * 170); scene.add(cloud); clouds.push(cloud);
   }
-  return { colliders, cameraSurfaces, sunlight, clouds };
+  return { colliders, cameraSurfaces, sunlight, clouds, trees };
 }
 
 export function createAvatar(scene) {

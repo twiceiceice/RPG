@@ -5,6 +5,7 @@ import { Hunting } from './combat.js';
 import { HuntingView } from './hunting-view.js';
 import { WARRIOR_SKILLS } from './warrior.js';
 import { WarriorView } from './warrior-view.js';
+import { ForestryView } from './forestry-view.js';
 
 const $ = id => document.getElementById(id);
 const world = $('world'), loading = $('loading');
@@ -27,7 +28,9 @@ const camera = new THREE.PerspectiveCamera(57, innerWidth / innerHeight, .08, 22
 const environment = createEnvironment(scene);
 const avatar = createAvatar(scene);
 const player = new Movement(environment.colliders);
-const hunting = new Hunting(environment.colliders);
+const hunting = new Hunting(environment.colliders, environment.trees);
+const forestry = hunting.forestry;
+const forestryView = new ForestryView(scene,camera,forestry,environment.trees);
 const huntingView = new HuntingView(scene, camera, avatar, hunting, environment);
 const warrior = hunting.warrior;
 const warriorView = new WarriorView(scene, camera, avatar, warrior);
@@ -41,6 +44,7 @@ const focus = new THREE.Vector3(), desired = new THREE.Vector3(), offset = new T
 const raycaster = new THREE.Raycaster();
 const input = { x: 0, z: 0, sprint: false };
 const floatingHits = [];
+let woodReceipt = null;
 let hitFeedback = 0;
 let cameraShake = 0, impactPause = 0;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -122,6 +126,11 @@ function useWarriorSkill(skill, showHint = true) {
   if (result.accepted) updateWarriorHUD();
   return result;
 }
+function upgradeHandle() {
+  const result = !started ? {accepted:false,reason:'플레이를 먼저 시작해 주세요.'} : forestry.upgrade();
+  if(!result.accepted)notify(result.reason);
+  updateHUD();return result;
+}
 function beginBowDraw(owner) {
   if (!started || paused || drawOwner || !hunting.beginDraw()) return false;
   drawOwner = owner;
@@ -145,6 +154,7 @@ function releaseBowDraw(owner) {
 $('sword-button').addEventListener('click', () => equipWeapon('sword'));
 $('bow-button').addEventListener('click', () => equipWeapon('bow'));
 $('axe-button').addEventListener('click', () => equipWeapon('axe'));
+$('upgrade-handle').addEventListener('click', () => { upgradeHandle();world.focus({preventScroll:true}); });
 for (const skill of WARRIOR_SKILLS) $('skill-' + skill.id).addEventListener('click', () => { useWarriorSkill(skill.id); world.focus({ preventScroll: true }); });
 $('revive-button').addEventListener('click', () => { resetPosition(); play(); });
 $('play-button').addEventListener('click', play);
@@ -175,6 +185,7 @@ document.addEventListener('keydown', event => {
   if (event.code === 'KeyZ') equipWeapon('axe');
   if (event.code === 'KeyX') equipWeapon('sword');
   if (event.code === 'KeyC') equipWeapon('bow');
+  if (event.code === 'KeyT') {event.preventDefault();upgradeHandle();return;}
   if (!started || paused) return;
   const skill = WARRIOR_SKILLS.find(s => event.code === 'Digit' + s.key);
   if (skill) { event.preventDefault(); useWarriorSkill(skill.id); return; }
@@ -292,7 +303,7 @@ function safeCameraPosition(target, candidate) {
   if (length < .01) return;
   raycaster.set(target, offset.multiplyScalar(1 / length));
   raycaster.far = length + .25;
-  const hit = raycaster.intersectObjects(environment.cameraSurfaces, false)[0];
+  const hit = raycaster.intersectObjects(environment.cameraSurfaces.filter(o=>o.userData.collider?.active!==false), false)[0];
   if (hit && hit.distance < length + .22) candidate.copy(target).addScaledVector(offset, Math.max(.15, hit.distance - .28));
 }
 function updateCamera(dt, immediate = false) {
@@ -335,7 +346,9 @@ function animateAvatar(dt, time) {
   avatar.arms.forEach((arm, i) => { arm.rotation.x = player.grounded ? -Math.sin(phase + i * Math.PI) * stride * .7 : -.75; arm.rotation.z = (i === 0 ? 1 : -1) * (.05 + Math.sin(time * 1.6) * .025); });
 }
 function updateWarriorHUD() {
-  $('critical-opening').hidden = !started || !hunting.entities.some(e => e.alive && e.offBalance > 0 && Math.hypot(e.x - player.x, e.z - player.z) < 18);
+  const nearbyOpening=hunting.targets().find(e=>e.alive&&e.offBalance>0&&Math.hypot(e.x-player.x,e.z-player.z)<18);
+  $('critical-opening').hidden = !started || !nearbyOpening;
+  if(nearbyOpening)$('critical-opening').textContent=nearbyOpening.kind==='tree'?'✦ 금이 간 나무 · 다음 적중은 치명타 ×2':'✦ 비틀거리는 적 · 다음 적중은 치명타 ×2';
   const a = warrior.active;
   const progress = a ? a.elapsed / a.duration : 0;
   const elapsed = a?.elapsed ?? 0;
@@ -382,11 +395,16 @@ function updateHUD() {
   $('health-fill').style.width = `${hp}%`; $('health-meter').setAttribute('aria-valuenow', String(hp));
   $('health-fill').style.background = hp < 30 ? '#ed9984' : '#b3dc94';
   $('rabbit-count').textContent = hunting.kills.rabbit; $('slime-count').textContent = hunting.kills.slime;
+  $('wood-count').textContent=forestry.wood;
+  $('handle-state').textContent=`벌목 +${Math.round(forestry.bonus*100)}% · ${forestry.level}/3`;
+  $('upgrade-handle').disabled=!started||hunting.hp<=0||forestry.cost===null||forestry.wood<forestry.cost;
+  $('upgrade-handle').textContent=forestry.cost===null?'손잡이 강화 완료':`T 손잡이 강화 · 목재 ${forestry.cost}`;
+  $('lumber-hint').textContent=forestry.felled===0?'나무도 1~5 기술로 벨 수 있어요':`나무 ${forestry.felled}그루 · 근처 목재 자동 줍기`;
   const aim = huntingView.aim();
-  const target = hunting.entities.find(e => e.id === aim.entity && e.alive);
+  const target = hunting.targets().find(e => e.id === aim.entity && e.alive);
   $('target-info').hidden = !target || !started;
   $('crosshair').classList.toggle('on-target', !!target);
-  if (target) { $('target-name').textContent = target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]; $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; }
+  if (target) { $('target-name').textContent = target.kind==='tree'?(target.scale>=1.2?'굵은 소나무':'소나무'):target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]; $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; $('target-opening').textContent=target.kind==='tree'?'균열 · 다음 적중 2배':'비틀거림 · 다음 적중 2배'; }
   updateWarriorHUD();
 }
 function handleCombatEvents() {
@@ -397,7 +415,7 @@ function handleCombatEvents() {
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .25, event.z), life: event.critical ? 1.15 : .85 });
       huntingView.particleBurst(event.critical ? { ...event, kind: 'impact' } : event);
     } else if (event.type === 'off-balance') {
-      const el = document.createElement('span'); el.className = 'damage-number off-balance'; el.textContent = '비틀거림'; $('combat-fx').appendChild(el);
+      const el = document.createElement('span'); el.className = 'damage-number off-balance'; el.textContent = event.kind==='tree'?'균열 · 다음 공격 2배':'비틀거림'; $('combat-fx').appendChild(el);
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .8, event.z), life: 1 });
     } else if (event.type === 'warrior-impact') {
       warriorView.effect(event); huntingView.particleBurst({ ...event, y: event.y + .2, kind: 'impact' });
@@ -408,7 +426,19 @@ function handleCombatEvents() {
     else if (event.type === 'spin-pulse' && event.extension>0) {
       const el=document.createElement('span');el.className='damage-number spin-extension';el.textContent=`+${event.extension.toFixed(2)}초`;$('combat-fx').appendChild(el);
       floatingHits.push({el,position:new THREE.Vector3(event.x+.7,event.y+2.6,event.z),life:.6});
-    } else if (event.type === 'swing') huntingView.swingEffect(event);
+    } else if(event.type==='tree-felled') {
+      huntingView.particleBurst({...event,type:'defeat',kind:'tree'});
+      if(!reduceMotion)cameraShake=Math.max(cameraShake,.07);
+      notify(`나무를 베었어요 · 목재 ${event.wood}개${event.bonus?' (치명타 보너스 +2)':''}`);
+    } else if(event.type==='wood-collected') {
+      if(woodReceipt&&woodReceipt.life>0){woodReceipt.amount+=event.amount;woodReceipt.life=.9;}
+      else {
+        const el=document.createElement('span');el.className='damage-number wood-reward';$('combat-fx').appendChild(el);
+        woodReceipt={el,position:new THREE.Vector3(event.x+.7,event.y+.4,event.z),life:.9,amount:event.amount};floatingHits.push(woodReceipt);
+      }
+      woodReceipt.el.textContent=`목재 +${woodReceipt.amount}`;
+    } else if(event.type==='lumber-upgrade')notify(`손잡이 ${event.level}단계 · 도끼 벌목 피해 +${event.bonus}%`);
+    else if (event.type === 'swing') huntingView.swingEffect(event);
     else if (['defeat', 'impact', 'spawn'].includes(event.type)) huntingView.particleBurst(event);
     else if (event.type === 'player-defeat') { setPaused(true); $('defeat').hidden = false; $('resume').hidden = true; }
   }
@@ -445,7 +475,7 @@ function frame(milliseconds) {
       if (hunting.hp <= 0) break;
     }
   }
-  animateAvatar(dt, time); updateCamera(dt);
+  animateAvatar(dt, time); forestryView.update(player);updateCamera(dt);
   handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); warriorView.update(dt, firstPerson, player, paused); combatFeedback(dt);
   if (!paused) { cameraShake *= Math.exp(-18 * dt); camera.position.x += Math.sin(time * 61) * cameraShake; camera.position.y += Math.cos(time * 47) * cameraShake * .65; }
   environment.clouds.forEach((cloud, i) => { cloud.position.x += dt * (.15 + i * .01); if (cloud.position.x > 110) cloud.position.x = -110; });
@@ -461,7 +491,7 @@ window.addEventListener('resize', () => {
 renderer.domElement.addEventListener('webglcontextlost', event => {
   event.preventDefault(); setPaused(true); loading.textContent = '그래픽 연결이 끊겼어요. 새로고침하면 다시 시작할 수 있어요.'; loading.hidden = false;
 });
-equipWeapon('axe'); updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true); renderer.render(scene, camera);
+equipWeapon('axe'); forestryView.update(player);updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true); renderer.render(scene, camera);
 loading.hidden = true; $('welcome').hidden = false;
 requestAnimationFrame(frame);
 
@@ -475,6 +505,7 @@ if (modelContext?.registerTool) {
     paused, started, health: Math.ceil(hunting.hp), weapon: hunting.weapon, kills: { ...hunting.kills },
     bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
     warrior: warrior.state(),
+    forestry: forestry.state(player),
     combat: { criticalHits: hunting.criticalHits, lastHit: hunting.lastHit ? { ...hunting.lastHit } : null },
     creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,offBalanceSeconds:+e.offBalance.toFixed(2),knockback:e.knockback?{power:e.knockback.id,progress:+(e.knockback.elapsed/e.knockback.duration).toFixed(2)}:null,lastPush:e.lastPush?{...e.lastPush,travelled:+e.lastPush.travelled.toFixed(2)}:null,position:{x:+e.x.toFixed(2),y:+(e.y+e.hop).toFixed(2),z:+e.z.toFixed(2)}})),
   });
@@ -482,10 +513,13 @@ if (modelContext?.registerTool) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
   };
   const tools = [
-    { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read position, combat, combo progress and failure, ultimate readiness, spin stage, remaining time and last spin statistics. Also includes the planted axe, kick power, creature knockback and off-balance seconds, critical count and last successful hit.',
+    { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read player, combat, warrior and forestry state: wood inventory, handle upgrade, nearby trees with health, cracks and regrowth, and dropped wood. Includes combo progress, ultimate readiness, spin statistics and creatures.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute(input) { validateEmpty(input); return state(); } },
+    { name: 'upgrade_axe_handle', title: '벌목 손잡이 강화', description: 'Spend collected wood to improve axe damage against trees only, matching T and the visible upgrade button. Costs 12, 24, 36 wood; each level adds 15%, maximum 45%. Requires play to have started and a living player. Progress lasts for this play session and survives R or death, but not page reload.',
+      inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},
+      execute(input){validateEmpty(input);const result=upgradeHandle();if(!result.accepted)throw new Error(result.reason);return {...result,forestry:forestry.state(player)};} },
     { name: 'set_camera_view', title: '1·3인칭 선택', description: 'Switch between first-person and third-person camera, matching the V control.',
       inputSchema: { type: 'object', properties: { view: { type: 'string', enum: ['first', 'third'] } }, required: ['view'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
@@ -508,7 +542,7 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip a ready axe or sword and resume play. Recover a planted axe with skill 4. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
-    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill: 1 charge, 2 slam, 3 kick, 4 sweep, 5 spin ultimate. Kick and sweep need the planted axe. Kick leaps forward, rolling light/medium/strong PRD power: 18/26/36 damage, 3/4.5/6m knockback. Targets become off balance for one double-damage hit within 4 seconds. Sweep recalls the axe without retreating and lunges forward. Landing charge, slam, kick, sweep in order stores one spin. Misses, wrong order, weapon switching, axe retrieval, or waiting over 3 seconds after a skill ends break an unfinished combo. Rejected inputs and taking damage do not. Spin lasts 2.5s, hits all directions every .25s, and allows movement. Every third consecutive connected pulse is 2x critical; the first such pulse upgrades to stage 2, pulling nearby visible enemies inward. A missed pulse resets the streak. Critical pulses add .25s once each, kills add .5s each, total duration caps at 4s. No damage or pull through walls. One valid follow-up may be queued. Returns actual state; actions advance in real time.',
+    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill: 1 charge, 2 slam, 3 kick, 4 sweep, 5 spin ultimate. Kick and sweep need the planted axe. Kick leaps forward, rolling light/medium/strong PRD power: 18/26/36 damage, 3/4.5/6m knockback. Targets become off balance for one double-damage hit within 4 seconds. Sweep recalls the axe without retreating and lunges forward. Landing charge, slam, kick, sweep in order stores one spin. Misses, wrong order, weapon switching, axe retrieval, or waiting over 3 seconds after a skill ends break an unfinished combo. Rejected inputs and taking damage do not. Spin lasts 2.5s, hits all directions every .25s, and allows movement. Every third consecutive connected pulse is 2x critical; the first such pulse upgrades to stage 2, pulling nearby visible enemies inward. A missed pulse resets the streak. Critical pulses add .25s once each, kills add .5s each, total duration caps at 4s. No damage or pull through walls. Trees also accept the same attacks, combo and spin hits. Kick cracks trees for the next critical without moving them; stage 2 pulls dropped wood. Felling a tree gives the same spin duration bonus as a defeat. One valid follow-up may be queued. Returns actual state; actions advance in real time.',
       inputSchema: { type: 'object', properties: { skill: { type: 'string', enum: ['charge','slam','kick','sweep','spin'] } }, required: ['skill'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {

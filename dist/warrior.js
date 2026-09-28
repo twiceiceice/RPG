@@ -91,13 +91,14 @@ export class Warrior {
     }
   }
   spinTargets(player, radius) {
-    return this.combat.entities.filter(e => e.alive && Math.hypot(e.x-player.x,e.z-player.z) <= radius+e.radius
+    return this.combat.targets().filter(e => e.alive && Math.hypot(e.x-player.x,e.z-player.z) <= radius+e.radius
       && Math.abs(e.y+e.hop-player.y) < 1.8
-      && this.combat.unobstructed({x:player.x,y:player.y+.9,z:player.z},{x:e.x,y:e.y+e.hop+.6,z:e.z}));
+      && this.combat.unobstructed({x:player.x,y:player.y+.9,z:player.z},{x:e.x,y:e.y+e.hop+.6,z:e.z},e.collider));
   }
   updateSpin(dt, player) {
     const a = this.active, combat = this.combat;
     if (a.stage === 2) for (const e of this.spinTargets(player, SPIN.pullRadius)) {
+      if(e.kind==='tree')continue;
       const dx=player.x-e.x,dz=player.z-e.z,distance=Math.hypot(dx,dz);
       const travel=Math.min(Math.max(0,distance-1.1),SPIN.pullSpeed*dt);
       const steps=Math.max(1,Math.ceil(travel/.12));
@@ -114,7 +115,7 @@ export class Warrior {
         const dx=e.x-player.x,dz=e.z-player.z,length=Math.hypot(dx,dz)||1;
         const result=combat.damageEntity(e,a.stage===2?SPIN.empoweredDamage:SPIN.damage,dx/length,dz/length,{source:'spin',forceCritical:guaranteedCritical});
         critical ||= result.critical; if(result.killed) kills++;
-        e.knockX=e.knockZ=0;e.windup=0;e.stagger=Math.max(e.stagger,.18);
+        if(e.kind!=='tree'){e.knockX=e.knockZ=0;e.windup=0;e.stagger=Math.max(e.stagger,.18);}
       }
       a.hits += targets.length; a.kills += kills;
       a.streak = guaranteedCritical ? 0 : a.streak+1;
@@ -159,12 +160,12 @@ export class Warrior {
   }
   hitArea(player, { x = player.x, z = player.z, radius, damage, cone = -.2, knock = 3, stagger = .3, offBalance = 0, kick = false }) {
     const a = this.active, combat = this.combat; let hits = 0;
-    for (const e of combat.entities) {
+    for (const e of combat.targets()) {
       if (!e.alive || a.hitIds.has(e.id)) continue;
       const ex = e.x - player.x, ez = e.z - player.z, distance = Math.hypot(ex, ez);
       if (Math.hypot(e.x - x, e.z - z) > radius + e.radius || Math.abs(e.y + e.hop - player.y) > 1.7) continue;
       if (distance > .15 && (ex * a.dx + ez * a.dz) / distance < cone) continue;
-      if (!combat.unobstructed({ x: player.x, y: player.y + .9, z: player.z }, { x: e.x, y: e.y + .6 + e.hop, z: e.z })) continue;
+      if (!combat.unobstructed({ x: player.x, y: player.y + .9, z: player.z }, { x: e.x, y: e.y + .6 + e.hop, z: e.z }, e.collider)) continue;
       if (kick && !a.kickPower) {
         a.kickPower = this.kickPower.roll();
         this.lastKick = { ...a.kickPower, targetId: e.id, time: combat.time };
@@ -172,7 +173,7 @@ export class Warrior {
       const context = kick ? { source: 'kick', kickPower: a.kickPower.id, powerName: a.kickPower.name } : {};
       a.hitIds.add(e.id); combat.damageEntity(e, kick ? a.kickPower.damage : damage, a.dx, a.dz, context);
       if (offBalance > 0) combat.applyOffBalance(e, offBalance);
-      e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);
+      if(e.kind!=='tree'){e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);}
       if (kick) combat.launchEntity(e, a.dx, a.dz, a.kickPower);
       hits++;
     }

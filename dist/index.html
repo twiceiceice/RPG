@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#172e2c">
-  <meta name="description" content="양손 도끼 전사의 들판. 네 기술을 적중시켜 궁극기 회전베기를 열고, 적을 끌어당기며 사냥하세요.">
+  <meta name="description" content="양손 도끼로 사냥하고 나무를 베는 액션 들판. 네 기술을 연계해 회전베기를 열고, 목재로 벌목 손잡이를 강화하세요.">
   <title>바람의 들판 — 양손 도끼 전사</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23172e2c'/%3E%3Cpath d='M7 23L15 7l10 16H7Z' fill='%23cbe49c'/%3E%3Cpath d='M15 7v16h10Z' fill='%237fb7a2'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
@@ -25,6 +25,12 @@
     <div id="health-meter" class="health-meter" role="progressbar" aria-label="체력" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><span id="health-fill"></span></div>
     <div class="hunt-counts"><span>토끼 <b id="rabbit-count">0</b></span><span>슬라임 <b id="slime-count">0</b></span></div>
   </section>
+  <section id="lumber-hud" aria-label="벌목 보상">
+    <div class="lumber-total"><span>목재</span><strong id="wood-count">0</strong></div>
+    <span id="handle-state">벌목 +0% · 0/3</span>
+    <button id="upgrade-handle" disabled title="목재 12 / 24 / 36개로 강화. 단계마다 도끼의 나무 피해 +15%. 몬스터 피해는 동일해요.">T 손잡이 강화 · 목재 12</button>
+    <small id="lumber-hint">나무도 1~5 기술로 벨 수 있어요</small>
+  </section>
   <div id="target-info" hidden><span id="target-name"></span><span id="target-health"></span><span id="target-opening" hidden>비틀거림 · 다음 적중 2배</span></div>
   <div id="crosshair" aria-hidden="true" hidden></div>
   <div id="bow-charge" hidden><div id="charge-meter" class="charge-track" role="progressbar" aria-label="활 당긴 정도" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="charge-fill"></span></div><span id="charge-label">당기는 중 · 놓으면 발사</span></div>
@@ -33,8 +39,8 @@
   <section id="welcome" class="welcome" hidden aria-label="플레이 시작">
     <span class="eyebrow">양손 도끼 전사</span>
     <h2>내려찍고, 날아차고.</h2>
-    <p>날을 세워 내려찍고,<br>앞으로 날아가 적을 밀쳐내기.<br>도끼를 끌어와 크게 가로베기.</p>
-    <button id="play-button" class="primary">사냥 시작 <span aria-hidden="true">↗</span></button>
+    <p>사냥하던 도끼로 나무도 베어 보세요.<br>네 기술을 이어 회전베기를 열고,<br>모은 목재로 손잡이를 강화하세요.</p>
+    <button id="play-button" class="primary">들판으로 <span aria-hidden="true">↗</span></button>
     <small>1 → 2 → 3 → 4 적중 · 5 회전베기</small>
   </section>
   <div id="resume" class="resume" hidden><button id="resume-button">계속 걷기 <kbd>클릭</kbd></button></div>
@@ -72,6 +78,9 @@
   </div>
   <dialog id="help-dialog" aria-labelledby="help-title">
     <div class="dialog-heading"><h2 id="help-title">들판에서 살아남기</h2><button id="close-help" class="icon-button" aria-label="조작법 닫기">×</button></div>
+    <p><strong>벌목 · 같은 공격, 새로운 보상</strong><br>나무를 향해 기본 공격이나 1~5 기술을 쓰세요. 줄기가 흔들리고 금이 가다가 체력이 다하면 쓰러져요. 날아차기는 나무에 균열을 내서 4초 안의 다음 적중을 2배로 만들어요. 나무 적중도 4연계와 회전베기 강화에 인정됩니다. 뿌리박힌 나무는 밀리거나 끌려오지 않아요.</p>
+    <p>작은 나무는 <strong>목재 4개</strong>, 굵은 나무는 <strong>6개</strong>를 떨어뜨려요. 치명타로 마지막 일격을 넣으면 <strong>2개 추가</strong>! 3m 안의 목재는 자동으로 줍고, 2단계 회전베기는 6m 안의 목재도 끌어모아요. 칼과 활로도 벨 수 있지만 나무 피해는 절반이에요. 베어낸 나무는 60초 뒤, 주변에 아무도 없으면 다시 자라요.</p>
+    <p><strong>T · 손잡이 강화</strong><br>목재 12 / 24 / 36개로 세 번 강화해요. 단계마다 도끼의 벌목 피해 +15%, 최대 +45%입니다. 목재와 강화는 사망·R에도 유지돼요. 현재는 이번 플레이의 보상으로, <strong>페이지를 새로고침하면 초기화</strong>됩니다.</p>
     <dl><div><dt>이동</dt><dd>W A S D / 방향키</dd></div><div><dt>시점 회전</dt><dd>우클릭 드래그 / Q E</dd></div><div><dt>전사 기술</dt><dd>1 돌진 · 2 내려찍기<br>3 날아차기 · 4 가로베기<br>5 궁극기 회전베기</dd></div><div><dt>도끼 / 칼 / 활</dt><dd>Z / X / C</dd></div><div><dt>기본 공격</dt><dd>좌클릭 / F</dd></div><div><dt>달리기 / 점프</dt><dd>Shift / Space</dd></div><div><dt>1·3인칭 전환</dt><dd>V</dd></div><div><dt>카메라 거리</dt><dd>마우스 휠</dd></div><div><dt>위치·체력 회복</dt><dd>R</dd></div><div><dt>쉬기 / 마우스 해제</dt><dd>Esc</dd></div></dl>
     <p>내려찍기로 도끼를 박으면 날아차기와 가로베기를 쓸 수 있어요. 다음 기술을 미리 한 번 눌러 동작을 이어 보세요. 가만히 있으면 약 3초간 연계할 수 있고, 이동·점프·무기 변경으로 도끼를 회수할 수 있어요. 아래 기술 버튼을 직접 눌러도 됩니다.</p>
     <p><strong>5 · 궁극기 회전베기</strong><br>1 → 2 → 3 → 4를 순서대로 각각 적에게 맞히면 궁극기가 준비돼요. 대상이 달라도 되고, 약·중·강 발차기 모두 인정돼요. 빗나감, 순서 변경, 기술 종료 후 3초 초과, 도끼 회수·무기 변경은 진행 중인 연계를 끊어요. 발동되지 않은 키 입력과 단순 피격은 괜찮아요. 준비된 궁극기는 이동·피격·무기 변경에도 보관되고, 사망·R로 초기화돼요.</p>

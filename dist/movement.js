@@ -22,6 +22,7 @@ export class Movement {
   moveAxis(axis, amount) {
     this[axis] += amount;
     for (const box of this.colliders) {
+      if (box.active === false) continue;
       if (this.y >= box.top - .04 || this.y + PLAYER_HEIGHT <= box.bottom + .01) continue;
       if (!overlaps(this.x, this.z, box)) continue;
       if (this.grounded && box.top - this.y <= .26) { this.y = box.top; continue; }
@@ -64,6 +65,7 @@ export class Movement {
     let nextY = this.y + this.vy * dt;
     let floor = terrainHeight(this.x, this.z);
     for (const box of this.colliders) {
+      if (box.active === false) continue;
       if (!overlaps(this.x, this.z, box, PLAYER_RADIUS * .92)) continue;
       if (this.vy <= 0 && this.y >= box.top - .06) floor = Math.max(floor, box.top);
       if (this.vy > 0 && oldY + PLAYER_HEIGHT <= box.bottom && nextY + PLAYER_HEIGHT >= box.bottom) {

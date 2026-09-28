@@ -1,5 +1,6 @@
 import { terrainHeight, overlaps, WORLD_RADIUS } from './movement.js';
 import { Warrior } from './warrior.js';
+import { Forestry } from './forestry.js';
 
 const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
 export function segmentSphere(a, b, center, radius) {
@@ -25,13 +26,14 @@ export function segmentBox(a,b,box) {
   return near;
 }
 export class Hunting {
-  constructor(colliders=[]) {
+  constructor(colliders=[],trees=[]) {
     this.colliders=colliders;this.entities=[];this.arrows=[];this.events=[];
     this.weapon='sword';this.cooldown=0;this.swing=0;this.hp=100;this.invincible=0;
     this.drawing=false;this.charge=0;this.release=0;this.lastCharge=0;
     this.hurt=0;this.sinceHit=100;this.kills={rabbit:0,slime:0};this.time=0;this.nextArrow=1;
     this.criticalHits=0;this.lastHit=null;
     this.warrior=new Warrior(this);
+    this.forestry=new Forestry(this,trees);
     const rabbits=[[-3,2],[4,-2],[-5,-10],[10,-11],[-13,5],[12,10]];
     const slimes=[[4,-9],[-2,-17],[12,-22],[-14,-23],[20,-6]];
     for(const [kind,spots] of [['rabbit',rabbits],['slime',slimes]]) {
@@ -49,9 +51,12 @@ export class Hunting {
   restorePlayer() {
     this.cancelDraw();this.warrior.cancel(true);this.hp=100;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
     this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.knockback=null;e.lastPush=null;e.hop=0;e.knockX=e.knockZ=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
+    for(const tree of this.forestry.trees){tree.offBalance=0;tree.flash=0;}
   }
-  unobstructed(a,b) { return !this.colliders.some(box=>{const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
+  targets() { return this.entities.concat(this.forestry.trees); }
+  unobstructed(a,b,ignore=null) { return !this.colliders.some(box=>{if(box===ignore||box.active===false)return false;const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
   damageEntity(e,damage,dx,dz,context={}) {
+    if(e.kind==='tree')return this.forestry.damage(e,damage,dx,dz,context);
     if(!e.alive||damage<=0)return;
     const critical=e.offBalance>0||context.forceCritical===true;
     if(critical){damage*=2;e.offBalance=0;this.criticalHits++;}
@@ -64,10 +69,10 @@ export class Hunting {
   applyOffBalance(e,seconds) {
     if(!e.alive)return;
     e.offBalance=seconds;
-    this.events.push({type:'off-balance',id:e.id,x:e.x,y:e.y+e.height,z:e.z});
+    this.events.push({type:'off-balance',id:e.id,kind:e.kind,x:e.x,y:e.y+(e.kind==='tree'?1.5:e.height),z:e.z});
   }
   launchEntity(e,dx,dz,power) {
-    if(!e.alive)return;
+    if(!e.alive||e.kind==='tree')return;
     const length=Math.hypot(dx,dz)||1;
     e.knockX=e.knockZ=0;e.windup=0;e.stagger=power.duration+1.15;e.recovery=e.stagger;
     e.knockback={dx:dx/length,dz:dz/length,elapsed:0,...power};
@@ -100,14 +105,14 @@ export class Hunting {
     if(this.weapon==='sword') {
       this.cooldown=.43;this.swing=.34;
       this.events.push({type:'swing',x:player.x,y:player.y+.9,z:player.z,dx,dz});
-      for(const e of this.entities) {
+      for(const e of this.targets()) {
         if(!e.alive)continue;
         const ex=e.x-player.x,ez=e.z-player.z,dist=Math.hypot(ex,ez);
         const centerY=e.y+e.hop+e.height*.5;
         if(dist>2.6+e.radius||Math.abs(centerY-(player.y+1))>1.45)continue;
         if(dist>.15&&(ex*dx+ez*dz)/dist<.35)continue;
-        if(!this.unobstructed({x:player.x,y:player.y+1,z:player.z},{x:e.x,y:centerY,z:e.z}))continue;
-        this.damageEntity(e,32,dx,dz);
+        if(!this.unobstructed({x:player.x,y:player.y+1,z:player.z},{x:e.x,y:centerY,z:e.z},e.collider))continue;
+        this.damageEntity(e,32,dx,dz,{weapon:'sword'});
       }
     }
     return true;
@@ -120,9 +125,10 @@ export class Hunting {
     return true;
   }
   moveEntity(e,dx,dz) {
+    if(e.kind==='tree')return;
     for(const [axis,amount] of [['x',dx],['z',dz]]) {
       const old=e[axis];e[axis]+=amount;
-      if(this.colliders.some(b=>e.y<b.top-.08&&e.y+e.height>b.bottom&&overlaps(e.x,e.z,b,e.radius))){e[axis]=old;e.heading+=.9;}
+      if(this.colliders.some(b=>b.active!==false&&e.y<b.top-.08&&e.y+e.height>b.bottom&&overlaps(e.x,e.z,b,e.radius))){e[axis]=old;e.heading+=.9;}
     }
     const d=Math.hypot(e.x,e.z);
     if(d>WORLD_RADIUS-3){e.x*=((WORLD_RADIUS-3)/d);e.z*=((WORLD_RADIUS-3)/d);e.heading+=Math.PI*.8;}
@@ -134,6 +140,7 @@ export class Hunting {
     this.invincible=Math.max(0,this.invincible-dt);this.hurt=Math.max(0,this.hurt-dt);this.sinceHit+=dt;
     for(const e of this.entities)e.offBalance=Math.max(0,e.offBalance-dt);
     this.warrior.update(dt,player);
+    this.forestry.update(dt,player);
     if(this.hp>0&&this.sinceHit>6)this.hp=Math.min(100,this.hp+4*dt);
     for(const e of this.entities) {
       e.flash=Math.max(0,e.flash-dt);e.recovery=Math.max(0,e.recovery-dt);
@@ -195,16 +202,20 @@ export class Hunting {
       const old={x:arrow.x,y:arrow.y,z:arrow.z};
       const next={x:arrow.x+arrow.vx*dt,y:arrow.y+arrow.vy*dt,z:arrow.z+arrow.vz*dt};arrow.vy-=1.7*dt;
       let nearest=1,hit=null,blocked=false;
-      for(const b of this.colliders){const t=segmentBox(old,next,b);if(t!==null&&t<=nearest){nearest=t;blocked=true;}}
+      for(const b of this.colliders){
+        if(b.active===false)continue;
+        const t=segmentBox(old,next,b);
+        if(t!==null&&t<=nearest){nearest=t;hit=b.treeId?this.forestry.trees.find(e=>e.id===b.treeId&&e.alive)??null:null;blocked=!hit;}
+      }
       const ground=terrainHeight(next.x,next.z);
-      if(next.y<=ground){const t=clamp((old.y-ground)/(old.y-next.y||1),0,1);if(t<=nearest){nearest=t;blocked=true;}}
+      if(next.y<=ground){const t=clamp((old.y-ground)/(old.y-next.y||1),0,1);if(t<=nearest){nearest=t;blocked=true;hit=null;}}
       for(const e of this.entities){
         if(!e.alive)continue;
         const t=segmentSphere(old,next,{x:e.x,y:e.y+e.hop+e.height*.5,z:e.z},e.kind==='rabbit'?.48:.78);
         if(t!==null&&t<nearest){nearest=t;hit=e;blocked=false;}
       }
       arrow.x=old.x+(next.x-old.x)*nearest;arrow.y=old.y+(next.y-old.y)*nearest;arrow.z=old.z+(next.z-old.z)*nearest;
-      if(hit){const n=Math.hypot(arrow.vx,arrow.vz)||1;this.damageEntity(hit,arrow.damage,arrow.vx/n,arrow.vz/n);arrow.life=0;}
+      if(hit){const n=Math.hypot(arrow.vx,arrow.vz)||1;this.damageEntity(hit,arrow.damage,arrow.vx/n,arrow.vz/n,{weapon:'bow'});arrow.life=0;}
       else if(blocked){this.events.push({type:'impact',x:arrow.x,y:arrow.y,z:arrow.z});arrow.life=0;}
     }
     this.arrows=this.arrows.filter(a=>a.life>0);

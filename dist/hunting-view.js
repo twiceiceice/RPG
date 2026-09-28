@@ -83,7 +83,7 @@ export class HuntingView{
     this.creatures=new Map();this.projectiles=new Map();this.effects=[];this.proxies=[];
     this.ray=new THREE.Raycaster();this.direction=new THREE.Vector3();
     this.sparkGeometry=new THREE.IcosahedronGeometry(.065,0);
-    this.sparkMaterials={rabbit:material(0xf2dfba),slime:material(0x9feaa7),impact:material(0xf1d581)};
+    this.sparkMaterials={rabbit:material(0xf2dfba),slime:material(0x9feaa7),impact:material(0xf1d581),tree:material(0xc69355)};
     this.arrowTemplate=makeArrow();
     for(const e of hunting.entities){
       const root=new THREE.Group();scene.add(root);
@@ -116,7 +116,7 @@ export class HuntingView{
     this.scene.updateMatrixWorld(true);this.camera.updateMatrixWorld();
     this.camera.getWorldDirection(this.direction);this.ray.set(this.camera.position,this.direction);this.ray.far=85;
     const live=this.proxies.filter(p=>this.hunting.entities.find(e=>e.id===p.userData.entityId)?.alive);
-    const hit=this.ray.intersectObjects([...this.environment.cameraSurfaces,...live],false)[0];
+    const hit=this.ray.intersectObjects([...this.environment.cameraSurfaces.filter(o=>o.userData.collider?.active!==false),...live],false)[0];
     return {point:hit?hit.point.clone():this.camera.position.clone().addScaledVector(this.direction,70),direction:this.direction.clone(),entity:hit?.object.userData.entityId};
   }
   particleBurst(event){
