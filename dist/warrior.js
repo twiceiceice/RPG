@@ -31,6 +31,7 @@ export class Warrior {
     if (resetCooldowns) { for (const id in this.cooldowns) this.cooldowns[id] = 0; this.lastKick = null; this.ultimate.lastSpin = null; this.combo.failure = null; }
   }
   reason(id, player) {
+    if(this.combat.village?.isSafe(player))return '마을에서는 무기를 쉬게 해 주세요. 서쪽 문을 나가면 전투할 수 있어요.';
     if (!skillById[id]) return '알 수 없는 기술이에요.';
     if (this.combat.hp <= 0) return '먼저 다시 일어나 주세요.';
     if (this.combat.weapon !== 'axe') return 'Z 키로 양손 도끼를 들어 주세요.';
@@ -44,6 +45,7 @@ export class Warrior {
     return null;
   }
   request(id, player, direction) {
+    if(this.combat.village?.isSafe(player))return {accepted:false,reason:this.reason(id,player)};
     if (!skillById[id]) return { accepted: false, reason: '알 수 없는 기술이에요.' };
     this.setAim(direction);
     // A deliberate skill takes priority over an automatic swing, even mid-swing.
@@ -152,6 +154,7 @@ export class Warrior {
     this.ultimate.lastSpin = { stage:a.stage, duration:a.duration, hits:a.hits, criticalPulses:a.criticalPulses, kills:a.kills, extended:a.extended };
   }
   basicAttack(player, direction) {
+    if(this.combat.village?.isSafe(player))return false;
     if (this.active || this.planted || this.combat.cooldown > 0 || this.combat.meleeCooldown > 1e-8 || this.combat.hp <= 0) return false;
     this.start('slash', player, direction); this.combat.cooldown = .62; this.combat.meleeCooldown = this.combat.meleeInterval; return true;
   }

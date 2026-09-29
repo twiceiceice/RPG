@@ -1,5 +1,6 @@
 import * as THREE from './vendor/three.module.js';
 import { terrainHeight } from './movement.js';
+import { inVillage } from './village-data.js';
 
 const mat = (color, extra = {}) => new THREE.MeshStandardMaterial({ color, roughness: .95, ...extra });
 const grass = mat(0x728f42), bark = mat(0x79614a), stone = mat(0x91a098);
@@ -76,7 +77,7 @@ export function createEnvironment(scene) {
   for (let i = 0; i < 85; i++) {
     const angle = random() * Math.PI * 2, radius = 13 + random() * 61;
     const x = Math.cos(angle) * radius, z = Math.sin(angle) * radius;
-    if (Math.abs(x - Math.sin(z * .08) * 3.5) < 6 || (x < -4 && x > -12 && z < 0 && z > -20)) continue;
+    if (inVillage(x,z,3) || Math.abs(x - Math.sin(z * .08) * 3.5) < 6 || (x < -4 && x > -12 && z < 0 && z > -20)) continue;
     const scale = .8 + random() * .75;
     if (trees.some(t=>Math.hypot(t.x-x,t.z-z)<2.6)) continue;
     plantTree(x,z,scale,i);
@@ -85,7 +86,7 @@ export function createEnvironment(scene) {
   for (let i = 0; i < 24; i++) {
     const a = random() * Math.PI * 2, r = 15 + random() * 40;
     const x = Math.cos(a) * r, z = Math.sin(a) * r, y = terrainHeight(x, z);
-    if (Math.abs(x) < 7) continue;
+    if (Math.abs(x) < 7 || inVillage(x,z,3)) continue;
     const size = .55 + random() * 1.0;
     const rock = mesh(new THREE.DodecahedronGeometry(size, 0), mat(i % 2 ? 0x7d8b80 : 0x9ca792), x, y + size * .3, z, scene);
     rock.scale.set(1.1, .8, 1); rock.rotation.set(random() * .5, random() * 6, 0);
@@ -102,7 +103,7 @@ export function createEnvironment(scene) {
     const nearPath = Math.abs(x - Math.sin(z * .08) * 3.5) < 2.7;
     dummy.position.set(x, terrainHeight(x, z) + .16, z);
     dummy.rotation.set(0, random() * 6, (random() - .5) * .2);
-    dummy.scale.setScalar(nearPath ? .08 : .7 + random() * .8); dummy.updateMatrix(); blades.setMatrixAt(i, dummy.matrix);
+    dummy.scale.setScalar(inVillage(x,z,1) ? 0 : nearPath ? .08 : .7 + random() * .8); dummy.updateMatrix(); blades.setMatrixAt(i, dummy.matrix);
   }
   blades.receiveShadow = true; scene.add(blades);
   const flowerGeometry = new THREE.IcosahedronGeometry(.105, 0);
@@ -110,7 +111,7 @@ export function createEnvironment(scene) {
     const flowers = new THREE.InstancedMesh(flowerGeometry, mat(color), count);
     for (let i = 0; i < count; i++) {
       const x = (random() - .5) * 70, z = (random() - .5) * 65;
-      dummy.position.set(x, terrainHeight(x, z) + .23, z); dummy.rotation.set(0, random() * 6, 0); dummy.scale.set(1, .7, 1); dummy.updateMatrix(); flowers.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, terrainHeight(x, z) + .23, z); dummy.rotation.set(0, random() * 6, 0); dummy.scale.set(1, .7, 1);if(inVillage(x,z,1))dummy.scale.setScalar(0);dummy.updateMatrix();flowers.setMatrixAt(i, dummy.matrix);
     }
     scene.add(flowers);
   }

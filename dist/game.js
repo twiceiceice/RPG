@@ -1,11 +1,14 @@
 import * as THREE from './vendor/three.module.js';
-import { Movement } from './movement.js';
+import { Movement, terrainHeight } from './movement.js';
 import { createEnvironment, createAvatar } from './environment.js';
 import { Hunting } from './combat.js';
 import { HuntingView } from './hunting-view.js';
 import { WARRIOR_SKILLS } from './warrior.js';
 import { WarriorView } from './warrior-view.js';
 import { ForestryView } from './forestry-view.js';
+import { Village } from './village.js';
+import { VILLAGE } from './village-data.js';
+import { createVillageScenery, VillageView } from './village-view.js';
 
 const $ = id => document.getElementById(id);
 const world = $('world'), loading = $('loading');
@@ -26,10 +29,14 @@ world.appendChild(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(57, innerWidth / innerHeight, .08, 220);
 const environment = createEnvironment(scene);
+createVillageScenery(scene,environment);
 const avatar = createAvatar(scene);
 const player = new Movement(environment.colliders);
 const hunting = new Hunting(environment.colliders, environment.trees);
 const forestry = hunting.forestry;
+let localSave=null;try{localSave=window.localStorage;}catch{/* Private browsing may disable storage. */}
+const village=new Village(hunting,localSave);
+const villageView=new VillageView(scene,camera,village);
 const forestryView = new ForestryView(scene,camera,forestry,environment.trees);
 const huntingView = new HuntingView(scene, camera, avatar, hunting, environment);
 const warrior = hunting.warrior;
@@ -47,6 +54,7 @@ const floatingHits = [];
 let woodReceipt = null;
 let hitFeedback = 0;
 let cameraShake = 0, impactPause = 0;
+let talkingTo=null;
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function notify(message) {
@@ -60,7 +68,7 @@ function capturePointer(element, pointerId) {
 }
 function setPaused(value) {
   paused = value; clearInput(); accumulator = 0;
-  $('resume').hidden = !value || !started || $('help-dialog').open || hunting.hp <= 0;
+  $('resume').hidden = !value || !started || $('help-dialog').open || $('trade-dialog').open || hunting.hp <= 0;
   if (value && document.pointerLockElement) document.exitPointerLock();
 }
 async function lockMouse() {
@@ -86,9 +94,11 @@ function setView(mode) {
   updateCamera(1, true);
 }
 function resetPosition() {
+  if($('trade-dialog').open)$('trade-dialog').close();
   const reviving = hunting.hp <= 0;
   player.reset(); yaw = .16; pitch = .29; clearInput();
   hunting.restorePlayer(); avatar.root.rotation.y = Math.PI;
+  hunting.inSanctuary=false;
   impactPause = 0;
   $('defeat').hidden = true;
   if (reviving && started) setPaused(false);
@@ -113,6 +123,7 @@ function equipWeapon(weapon) {
 }
 function attack() {
   if (!started || paused || hunting.hp <= 0) return false;
+  if(village.isSafe(player)){notify('마을은 안전 지역이에요. 서쪽 문을 나가면 전투할 수 있어요.');return false;}
   const aim = huntingView.aim();
   const attacked = hunting.attack(player, { x: -Math.sin(yaw), y: aim.direction.y, z: -Math.cos(yaw) }, aim.point);
   if (attacked) avatar.root.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
@@ -129,10 +140,52 @@ function useWarriorSkill(skill, showHint = true) {
 function upgradeHandle() {
   const result = !started ? {accepted:false,reason:'플레이를 먼저 시작해 주세요.'} : forestry.upgrade();
   if(!result.accepted)notify(result.reason);
-  updateHUD();return result;
+  village.save();updateHUD();if(talkingTo)renderTrade();return result;
+}
+function travelToVillage() {
+  const reason=$('trade-dialog').open||$('help-dialog').open?'대화나 도움말을 먼저 닫아 주세요.':village.travelReason(player);
+  if(reason){notify(reason);return {accepted:false,reason};}
+  Object.assign(player,{x:VILLAGE.entry.x,z:VILLAGE.entry.z,y:terrainHeight(VILLAGE.entry.x,VILLAGE.entry.z),vx:0,vz:0,vy:0,grounded:true,jumpBuffer:0});
+  hunting.inSanctuary=true;hunting.autoMelee.targetId=null;hunting.swing=0;impactPause=0;
+  started=true;setPaused(false);$('welcome').hidden=true;$('crosshair').hidden=false;
+  yaw=-.42;pitch=.34;cameraDistance=9;avatar.root.rotation.y=Math.PI-.42;
+  updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});
+  notify('솔바람 마을 · 가까운 주민에게 E로 대화해 보세요.');return {accepted:true};
+}
+function usePotion() {
+  const result=!started||paused?{accepted:false,reason:'플레이를 이어 간 뒤 물약을 사용해 주세요.'}:village.usePotion();
+  notify(result.message??result.reason);updateHUD();return result;
+}
+function renderTrade(message='') {
+  const npc=village.residents.find(n=>n.id===talkingTo);if(!npc)return;
+  const focusedOffer=document.activeElement?.dataset.offer;
+  $('resident-name').textContent=npc.name;$('resident-role').textContent=npc.role;$('resident-hello').textContent=npc.hello;
+  $('resident-portrait').textContent=npc.name.slice(0,1);$('resident-portrait').style.setProperty('--resident-color',`#${npc.color.toString(16).padStart(6,'0')}`);
+  $('trade-inventory').textContent=`${village.gold} 골드 · 목재 ${forestry.wood} · 물약 ${village.potions} · 갑옷 ${village.armorLevel}/3`;
+  const list=$('trade-offers');list.replaceChildren();
+  for(const offer of village.offers(npc.id)) {
+    const row=document.createElement('div');row.className='trade-offer';
+    const icon=document.createElement('span');icon.className=`offer-icon ${offer.icon}`;icon.textContent={wood:'▰',potion:'✚',armor:'◇',rest:'☕'}[offer.icon];icon.setAttribute('aria-hidden','true');
+    const details=document.createElement('div'),name=document.createElement('strong'),hint=document.createElement('span');name.textContent=offer.name;hint.textContent=offer.detail;details.append(name,hint);
+    const button=document.createElement('button');button.dataset.offer=offer.id;button.textContent=offer.price;button.disabled=!offer.enabled;button.title=offer.enabled?offer.name:offer.reason;button.setAttribute('aria-label',`${offer.name} · ${offer.price}`);button.addEventListener('click',()=>tradeWithResident(offer.id));
+    row.append(icon,details,button);list.append(row);
+  }
+  if(!list.children.length){const p=document.createElement('p');p.className='resident-tip';p.textContent='서쪽 문 밖으로는 사냥터가, 광장 주변으로는 상점과 여관이 있어요. 마을을 천천히 둘러보세요.';list.append(p);}
+  $('trade-message').textContent=message||'골드와 소지품은 거래하는 즉시 저장돼요.';
+  if(!village.storageAvailable)$('trade-message').textContent=message?`${message} (저장 불가 · 이번 플레이에서만 유지)`:'이 브라우저에서는 저장할 수 없어 이번 플레이에서만 유지돼요.';
+  if(focusedOffer){const next=[...list.querySelectorAll('button')].find(b=>b.dataset.offer===focusedOffer&&!b.disabled);(next??$('close-trade')).focus({preventScroll:true});}
+}
+function openResident(id=village.nearest(player)?.id) {
+  const reason=!started||paused?'플레이를 이어 간 뒤 주민에게 말을 걸어 주세요.':village.interactionReason(id,player);
+  if(reason){notify(reason);return {accepted:false,reason};}
+  talkingTo=id;renderTrade();$('trade-dialog').showModal();setPaused(true);$('interact-prompt').hidden=true;return {accepted:true};
+}
+function tradeWithResident(offerId) {
+  if(!$('trade-dialog').open||!talkingTo)return {accepted:false,reason:'먼저 가까운 상인과 대화해 주세요.'};
+  const result=village.trade(talkingTo,offerId,player);renderTrade(result.message??result.reason);updateHUD();return result;
 }
 function beginBowDraw(owner) {
-  if (!started || paused || drawOwner || !hunting.beginDraw()) return false;
+  if (!started || paused || village.isSafe(player) || drawOwner || !hunting.beginDraw()) return false;
   drawOwner = owner;
   return true;
 }
@@ -158,6 +211,12 @@ $('upgrade-handle').addEventListener('click', () => { upgradeHandle();world.focu
 for (const skill of WARRIOR_SKILLS) $('skill-' + skill.id).addEventListener('click', () => { useWarriorSkill(skill.id); world.focus({ preventScroll: true }); });
 $('revive-button').addEventListener('click', () => { resetPosition(); play(); });
 $('play-button').addEventListener('click', play);
+$('village-button').addEventListener('click',travelToVillage);
+$('village-start').addEventListener('click',travelToVillage);
+$('potion-button').addEventListener('click',()=>{usePotion();world.focus({preventScroll:true});});
+$('interact-prompt').addEventListener('click',()=>openResident());
+$('close-trade').addEventListener('click',()=>$('trade-dialog').close());
+$('trade-dialog').addEventListener('close',()=>{talkingTo=null;setPaused(document.hidden||!document.hasFocus());updateHUD();world.focus({preventScroll:true});});
 $('resume-button').addEventListener('click', play);
 $('view-button').addEventListener('click', () => { setView(firstPerson ? 'third' : 'first'); world.focus(); });
 $('reset-button').addEventListener('click', resetPosition);
@@ -175,7 +234,7 @@ document.addEventListener('pointerlockerror', () => {
   if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~4 연계 · 5 궁극기');
 });
 document.addEventListener('keydown', event => {
-  if ($('help-dialog').open) return;
+  if ($('help-dialog').open || $('trade-dialog').open) return;
   if (event.code === 'Escape') { if (started && !locked && hunting.hp > 0) setPaused(!paused); return; }
   if (event.code === 'Enter' && !started) { play(); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
@@ -186,7 +245,10 @@ document.addEventListener('keydown', event => {
   if (event.code === 'KeyX') equipWeapon('sword');
   if (event.code === 'KeyC') equipWeapon('bow');
   if (event.code === 'KeyT') {event.preventDefault();upgradeHandle();return;}
+  if (event.code === 'KeyB') {event.preventDefault();travelToVillage();return;}
   if (!started || paused) return;
+  if(event.code==='KeyH'){event.preventDefault();usePotion();return;}
+  if(event.code==='KeyE'&&village.nearest(player)){event.preventDefault();openResident();return;}
   const skill = WARRIOR_SKILLS.find(s => event.code === 'Digit' + s.key);
   if (skill) { event.preventDefault(); useWarriorSkill(skill.id); return; }
   keys.add(event.code);
@@ -198,6 +260,7 @@ document.addEventListener('keyup', event => {
   if (event.code === 'KeyF') releaseBowDraw('keyboard');
 });
 window.addEventListener('blur', () => { if (started) setPaused(true); });
+window.addEventListener('pagehide',()=>village.save());
 document.addEventListener('visibilitychange', () => { if (document.hidden && started) setPaused(true); });
 function look(dx, dy) {
   yaw -= dx * .0027;
@@ -390,6 +453,15 @@ function updateWarriorHUD() {
   $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / 3.4 * 100 : 0}%`;
 }
 function updateHUD() {
+  const safe=village.isSafe(player),near=village.nearest(player);
+  $('place-name').textContent=safe?VILLAGE.name:'시작의 들판';
+  $('gold-count').textContent=village.gold;
+  $('potion-button').textContent=village.potionCooldown>0?`물약 ${village.potionCooldown.toFixed(1)}초`:`H 물약 ${village.potions}`;
+  $('potion-button').disabled=!started||paused||hunting.hp<=0||hunting.hp>=100||village.potions<1||village.potionCooldown>0;
+  $('village-status').textContent=safe?'솔바람 마을 · 안전 지역':`솔바람 마을 ${Math.round(Math.hypot(player.x-VILLAGE.entry.x,player.z-VILLAGE.entry.z))}m · B 이동`;
+  $('village-status').classList.toggle('safe',safe);
+  $('interact-prompt').hidden=!started||paused||!near||hunting.hp<=0;
+  if(near)$('interact-label').textContent=`${near.name} · ${near.role}${near.shop?'과 거래하기':'과 대화하기'}`;
   $('coordinates').textContent = `${player.x.toFixed(0)} / ${(-player.z).toFixed(0)}`;
   const speed = Math.hypot(player.vx, player.vz);
   $('motion-state').textContent = paused && started ? '잠시 쉬는 중' : !player.grounded ? (player.vy > 0 ? '뛰어오르는 중' : '내려오는 중') : speed > 6 ? '달리는 중' : speed > .2 ? '걷는 중' : '가만히 서 있는 중';
@@ -401,6 +473,7 @@ function updateHUD() {
   const automatic=!!(hunting.autoAttackRecovery || hunting.autoMelee.targetId),melee=hunting.weapon!=='bow';
   $('auto-attack-status').textContent=!melee?'활 · 직접 조준해 발사':paused?'근접 자동 공격 · 대기':warrior.planted||(warrior.active&&warrior.active.id!=='slash')||warrior.combo.remaining>0?'자동 공격 · 기술 연계 대기':automatic?'근접 자동 공격 중':'근접 자동 공격 · 적 접근 시';
   $('auto-attack-status').classList.toggle('attacking',melee&&automatic&&!paused);
+  if(safe)$('auto-attack-status').textContent='안전 지역 · 무기를 쉬게 해요';
   $('wood-count').textContent=forestry.wood;
   $('handle-state').textContent=`벌목 +${Math.round(forestry.bonus*100)}% · ${forestry.level}/3`;
   $('upgrade-handle').disabled=!started||hunting.hp<=0||forestry.cost===null||forestry.wood<forestry.cost;
@@ -412,6 +485,8 @@ function updateHUD() {
   $('crosshair').classList.toggle('on-target', !!target);
   if (target) { $('target-name').textContent = target.kind==='tree'?(target.scale>=1.2?'굵은 소나무':'소나무'):target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]; $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; $('target-opening').textContent=target.kind==='tree'?'균열 · 다음 적중 2배':'비틀거림 · 다음 적중 2배'; }
   updateWarriorHUD();
+  $('warrior-hud').hidden=safe||hunting.weapon!=='axe';
+  if(safe){$('combo-title').textContent='솔바람 마을 · 안전 지역';$('combo-hint').textContent='주민 가까이 E 대화 · H 물약 · 서쪽 문으로 들판';for(const s of WARRIOR_SKILLS)$('skill-'+s.id).classList.add('unavailable');}
 }
 function handleCombatEvents() {
   for (const event of hunting.events.splice(0)) {
@@ -436,7 +511,11 @@ function handleCombatEvents() {
       huntingView.particleBurst({...event,type:'defeat',kind:'tree'});
       if(!reduceMotion)cameraShake=Math.max(cameraShake,.07);
       notify(`나무를 베었어요 · 목재 ${event.wood}개${event.bonus?' (치명타 보너스 +2)':''}`);
+    } else if(event.type==='gold-earned') {
+      const el=document.createElement('span');el.className='damage-number gold-reward';el.textContent=`+${event.amount} 골드`;$('combat-fx').appendChild(el);
+      floatingHits.push({el,position:new THREE.Vector3(event.x,event.y+.3,event.z),life:1.1});
     } else if(event.type==='wood-collected') {
+      village.save();
       if(woodReceipt&&woodReceipt.life>0){woodReceipt.amount+=event.amount;woodReceipt.life=.9;}
       else {
         const el=document.createElement('span');el.className='damage-number wood-reward';$('combat-fx').appendChild(el);
@@ -477,11 +556,11 @@ function frame(milliseconds) {
     const held = Math.min(impactPause,dt); impactPause -= held;
     accumulator += dt - held;
     while (accumulator >= 1 / 120) {
-      updateInput(1 / 120); player.update(1 / 120, input); hunting.update(1 / 120, player); hunting.autoAttack(player); accumulator -= 1 / 120;
+      updateInput(1 / 120); player.update(1 / 120, input); hunting.update(1 / 120, player); village.update(1 / 120,player); hunting.autoAttack(player); accumulator -= 1 / 120;
       if (hunting.hp <= 0) break;
     }
   }
-  animateAvatar(dt, time); forestryView.update(player);updateCamera(dt);
+  animateAvatar(dt, time); forestryView.update(player);villageView.update(player);updateCamera(dt);
   handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); warriorView.update(dt, firstPerson, player, paused); combatFeedback(dt);
   if (!paused) { cameraShake *= Math.exp(-18 * dt); camera.position.x += Math.sin(time * 61) * cameraShake; camera.position.y += Math.cos(time * 47) * cameraShake * .65; }
   environment.clouds.forEach((cloud, i) => { cloud.position.x += dt * (.15 + i * .01); if (cloud.position.x > 110) cloud.position.x = -110; });
@@ -497,7 +576,7 @@ window.addEventListener('resize', () => {
 renderer.domElement.addEventListener('webglcontextlost', event => {
   event.preventDefault(); setPaused(true); loading.textContent = '그래픽 연결이 끊겼어요. 새로고침하면 다시 시작할 수 있어요.'; loading.hidden = false;
 });
-equipWeapon('axe'); forestryView.update(player);updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true); renderer.render(scene, camera);
+equipWeapon('axe'); forestryView.update(player);villageView.update(player);updateHUD();updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true); renderer.render(scene, camera);
 loading.hidden = true; $('welcome').hidden = false;
 requestAnimationFrame(frame);
 
@@ -512,6 +591,7 @@ if (modelContext?.registerTool) {
     bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
     warrior: warrior.state(),
     forestry: forestry.state(player),
+    village:{...village.state(player),talkingTo},
     combat: { criticalHits: hunting.criticalHits, lastHit: hunting.lastHit ? { ...hunting.lastHit } : null,
       autoMelee: { enabled:hunting.weapon!=='bow',...hunting.autoMelee,intervalSeconds:hunting.meleeInterval,cooldown:+hunting.meleeCooldown.toFixed(3),attacking:!!(hunting.autoAttackRecovery&&(warrior.active?.id==='slash'||hunting.swing>0)) } },
     creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,offBalanceSeconds:+e.offBalance.toFixed(2),knockback:e.knockback?{power:e.knockback.id,progress:+(e.knockback.elapsed/e.knockback.duration).toFixed(2)}:null,lastPush:e.lastPush?{...e.lastPush,travelled:+e.lastPush.travelled.toFixed(2)}:null,position:{x:+e.x.toFixed(2),y:+(e.y+e.hop).toFixed(2),z:+e.z.toFixed(2)}})),
@@ -524,7 +604,11 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute(input) { validateEmpty(input); return state(); } },
-    { name: 'upgrade_axe_handle', title: '벌목 손잡이 강화', description: 'Spend collected wood to improve axe damage against trees only, matching T and the visible upgrade button. Costs 12, 24, 36 wood; each level adds 15%, maximum 45%. Requires play to have started and a living player. Progress lasts for this play session and survives R or death, but not page reload.',
+    { name:'travel_to_village',title:'솔바람 마을로 이동',description:'Go to the village square, matching B and the village button. Requires no active attack, planted axe, recent damage or nearby hostile slime. Also starts play from the welcome screen.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=travelToVillage();if(!r.accepted)throw new Error(r.reason);return state();}},
+    { name:'talk_to_resident',title:'주민과 대화',description:'Open the dialogue of a nearby unobstructed resident within 2.9m, matching E. Read resident ids from get_player_state. Pauses combat and movement during dialogue.',inputSchema:{type:'object',properties:{resident:{type:'string'}},required:['resident'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||typeof input.resident!=='string'||Object.keys(input).some(k=>k!=='resident'))throw new Error('resident must be an id.');const r=openResident(input.resident);if(!r.accepted)throw new Error(r.reason);return state();}},
+    { name:'trade_with_resident',title:'상인과 거래',description:'Use an offer displayed in the currently open resident dialogue. Read offer ids from get_player_state. Checks proximity, stock and price on every transaction.',inputSchema:{type:'object',properties:{offer:{type:'string'}},required:['offer'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||typeof input.offer!=='string'||Object.keys(input).some(k=>k!=='offer'))throw new Error('offer must be an id.');const r=tradeWithResident(input.offer);if(!r.accepted)throw new Error(r.reason);return {...r,...state()};}},
+    { name:'use_healing_potion',title:'회복 물약 사용',description:'Use one owned potion to restore up to 45 HP, matching H. Requires active play, missing HP and a 4 second cooldown.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=usePotion();if(!r.accepted)throw new Error(r.reason);return {...r,...state()};}},
+    { name: 'upgrade_axe_handle', title: '벌목 손잡이 강화', description: 'Spend collected wood to improve axe damage against trees only, matching T and the visible upgrade button. Costs 12, 24, 36 wood; each level adds 15%, maximum 45%. Requires play to have started and a living player. Gold, potions, armor, wood and handle upgrades save in this browser and survive page reload when storage is available.',
       inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},
       execute(input){validateEmpty(input);const result=upgradeHandle();if(!result.accepted)throw new Error(result.reason);return {...result,forestry:forestry.state(player)};} },
     { name: 'set_camera_view', title: '1·3인칭 선택', description: 'Switch between first-person and third-person camera, matching the V control.',

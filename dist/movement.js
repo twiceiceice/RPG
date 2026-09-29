@@ -1,10 +1,11 @@
 // Units are metres and seconds. Rendering and input are deliberately separate.
+import { villageGroundBlend } from './village-data.js';
 export const WORLD_RADIUS = 70;
 export const PLAYER_RADIUS = 0.34;
 export const PLAYER_HEIGHT = 1.85;
 export function terrainHeight(x, z) {
   const outside = Math.min(1, Math.max(0, (Math.hypot(x, z) - 15) / 24));
-  return (Math.sin(x * .075) * 1.8 + Math.cos(z * .085) * 1.3 + Math.sin((x + z) * .13) * .55) * outside;
+  return (Math.sin(x * .075) * 1.8 + Math.cos(z * .085) * 1.3 + Math.sin((x + z) * .13) * .55) * outside * villageGroundBlend(x,z);
 }
 export function overlaps(x, z, box, radius = PLAYER_RADIUS) {
   const px = Math.max(box.minX, Math.min(x, box.maxX));

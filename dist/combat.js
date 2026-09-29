@@ -32,7 +32,7 @@ export class Hunting {
     this.meleeInterval=2;this.meleeCooldown=0;
     this.drawing=false;this.charge=0;this.release=0;this.lastCharge=0;
     this.hurt=0;this.sinceHit=100;this.kills={rabbit:0,slime:0};this.time=0;this.nextArrow=1;
-    this.criticalHits=0;this.lastHit=null;
+    this.criticalHits=0;this.lastHit=null;this.armorLevel=0;this.inSanctuary=false;
     this.autoAttackRecovery=false;this.meleeFacing=null;
     this.autoMelee={targetId:null,attacks:0};
     this.warrior=new Warrior(this);
@@ -68,7 +68,7 @@ export class Hunting {
     e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=dx*4;e.knockZ=dz*4;
     this.lastHit={targetId:e.id,damage,critical,time:this.time,...context};
     this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height+e.hop,z:e.z,damage,critical,kind:e.kind,...context});
-    if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});}
+    if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});this.village?.rewardKill(e);}
     return { damage, critical, killed: !e.alive };
   }
   applyOffBalance(e,seconds) {
@@ -84,14 +84,14 @@ export class Hunting {
     e.lastPush={power:power.id,requested:power.distance,travelled:0,blocked:false};
   }
   beginDraw() {
-    if(this.weapon!=='bow'||this.hp<=0||this.cooldown>0||this.drawing)return false;
+    if(this.inSanctuary||this.weapon!=='bow'||this.hp<=0||this.cooldown>0||this.drawing)return false;
     this.drawing=true;this.charge=0;this.release=0;return true;
   }
   cancelDraw() { this.drawing=false;this.charge=0; }
   releaseDraw(player,direction,aimPoint) {
     if(!this.drawing)return false;
     const charge=this.charge;this.cancelDraw();
-    if(this.weapon!=='bow'||this.hp<=0||this.cooldown>0)return false;
+    if(this.village?.isSafe(player)||this.weapon!=='bow'||this.hp<=0||this.cooldown>0)return false;
     this.cooldown=.45;this.release=.24;this.lastCharge=charge;
     const horizontal=Math.hypot(direction.x,direction.z)||1;
     const dx=direction.x/horizontal,dz=direction.z/horizontal;
@@ -103,6 +103,7 @@ export class Hunting {
     this.events.push({type:'shoot',charge});return true;
   }
   attack(player,direction) {
+    if(this.village?.isSafe(player))return false;
     if(this.weapon==='axe') {
       const attacked=this.warrior.basicAttack(player,direction);
       if(attacked)this.autoAttackRecovery=false;
@@ -130,7 +131,7 @@ export class Hunting {
   autoAttack(player) {
     this.autoMelee.targetId=null;
     const w=this.warrior;
-    if(this.hp<=0 || !player.grounded || !['axe','sword'].includes(this.weapon)
+    if(this.village?.isSafe(player) || this.hp<=0 || !player.grounded || !['axe','sword'].includes(this.weapon)
       || w.active || w.planted || w.queued || (w.combo.step>0 && w.combo.remaining>0))return false;
     const range=this.weapon==='axe'?2.7:2.6;
     let target=null,nearest=Infinity;
@@ -160,7 +161,8 @@ export class Hunting {
     return true;
   }
   damagePlayer(amount) {
-    if(this.hp<=0||this.invincible>0)return false;
+    if(this.inSanctuary||this.hp<=0||this.invincible>0)return false;
+    amount=Math.max(1,amount-this.armorLevel*2);
     this.hp=Math.max(0,this.hp-amount);this.invincible=.65;this.hurt=.32;this.sinceHit=0;
     this.events.push({type:'hurt',damage:amount});
     if(this.hp===0){this.cancelDraw();this.warrior.cancel(false,true);this.events.push({type:'player-defeat'});}
@@ -170,13 +172,19 @@ export class Hunting {
     if(e.kind==='tree')return;
     for(const [axis,amount] of [['x',dx],['z',dz]]) {
       const old=e[axis];e[axis]+=amount;
-      if(this.colliders.some(b=>b.active!==false&&e.y<b.top-.08&&e.y+e.height>b.bottom&&overlaps(e.x,e.z,b,e.radius))){e[axis]=old;e.heading+=.9;}
+      if(this.village?.isSafe(e,e.radius)||this.colliders.some(b=>b.active!==false&&e.y<b.top-.08&&e.y+e.height>b.bottom&&overlaps(e.x,e.z,b,e.radius))){e[axis]=old;e.heading+=.9;}
     }
     const d=Math.hypot(e.x,e.z);
     if(d>WORLD_RADIUS-3){e.x*=((WORLD_RADIUS-3)/d);e.z*=((WORLD_RADIUS-3)/d);e.heading+=Math.PI*.8;}
     e.y=terrainHeight(e.x,e.z);
   }
   update(dt,player) {
+    this.inSanctuary=!!this.village?.isSafe(player);
+    if(this.inSanctuary){
+      this.cancelDraw();
+      if(this.warrior.active||this.warrior.planted||this.warrior.queued){this.warrior.cancel();player.vx=player.vz=0;}
+      this.swing=0;this.autoMelee.targetId=null;
+    }
     this.time+=dt;this.cooldown=Math.max(0,this.cooldown-dt);this.swing=Math.max(0,this.swing-dt);this.release=Math.max(0,this.release-dt);
     // The attack interval is independent of short swing recovery, so skills
     // remain responsive and cancelling a swing cannot reset basic-attack cadence.
@@ -221,7 +229,7 @@ export class Hunting {
         else {if(e.brain<=0){e.heading+=1.4+Math.sin(this.time+e.phase);e.brain=2.5;}speed=e.brain<1.5?.7:0;}
         e.hop=speed>0?Math.abs(Math.sin(e.phase))*(e.alert?.32:.12):0;
       } else {
-        e.alert=this.hp>0&&distance<13&&Math.abs(player.y-e.y)<4;
+        e.alert=!this.inSanctuary&&this.hp>0&&distance<13&&Math.abs(player.y-e.y)<4;
         if(e.windup>0){
           e.windup=Math.max(0,e.windup-dt);e.hop=Math.sin((1-e.windup/.5)*Math.PI)*.7;
           if(e.windup===0){
