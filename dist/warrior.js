@@ -127,7 +127,7 @@ export class Warrior {
   updateSpin(dt, player) {
     const a = this.active, combat = this.combat;
     if (a.stage === 2) for (const e of this.spinTargets(player, SPIN.pullRadius+(combat.progression?.bonuses.pullRadius??0))) {
-      if(e.kind==='tree')continue;
+      if(e.kind==='tree'||e.ccImmune)continue;
       const dx=player.x-e.x,dz=player.z-e.z,distance=Math.hypot(dx,dz);
       const travel=Math.min(Math.max(0,distance-1.1),SPIN.pullSpeed*dt);
       const steps=Math.max(1,Math.ceil(travel/.12));
@@ -144,7 +144,7 @@ export class Warrior {
         const dx=e.x-player.x,dz=e.z-player.z,length=Math.hypot(dx,dz)||1;
         const result=combat.damageEntity(e,a.stage===2?SPIN.empoweredDamage:SPIN.damage,dx/length,dz/length,{source:'spin',forceCritical:guaranteedCritical});
         critical ||= result.critical; if(result.killed) kills++;
-        if(e.kind!=='tree'){e.knockX=e.knockZ=0;e.windup=0;e.stagger=Math.max(e.stagger,.18);}
+        if(e.kind!=='tree'&&!e.ccImmune){e.knockX=e.knockZ=0;e.windup=0;e.stagger=Math.max(e.stagger,.18);}
       }
       a.hits += targets.length; a.kills += kills;
       a.streak = guaranteedCritical ? 0 : a.streak+1;
@@ -204,7 +204,7 @@ export class Warrior {
       a.hitIds.add(e.id); const result=combat.damageEntity(e, kick ? a.kickPower.damage : damage, a.dx, a.dz, context);
       if(result?.evaded)continue;
       if (offBalance > 0) combat.applyOffBalance(e, offBalance);
-      if(e.kind!=='tree'){e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);}
+      if(e.kind!=='tree'&&!e.ccImmune){e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);}
       if (kick) combat.launchEntity(e, a.dx, a.dz, a.kickPower);
       hits++;
     }

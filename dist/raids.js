@@ -1,17 +1,18 @@
 import {terrainHeight} from './movement.js';
 import {segmentSphere,segmentBox} from './combat.js';
 import {inVillage,RESIDENTS} from './village-data.js';
-import {CAMP,BEACON,ALLY_ROLES,EXPEDITION} from './raid-data.js';
+import {CAMP,BEACON,ALLY_ROLES,EXPEDITION,RAID_WAVES,RAID_REWARDS} from './raid-data.js';
 import {RaidNavigation} from './raid-navigation.js';
 import {SoldierSkills} from './raid-skills.js';
 import {BATTLE,bowShot,guardedDamage} from './battle-rules.js';
+import {RaidBoss} from './raid-boss.js';
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 
 export class Raids {
   constructor(combat,village){
     this.combat=combat;this.village=village;combat.raids=this;village.raids=this;
     this.nav=new RaidNavigation(combat.colliders);this.phase='idle';this.mode=null;this.wave=0;this.timer=0;this.elapsed=0;this.order='fight';this.enemies=[];this.allies=[];this.bolts=[];this.trails=[];this.serial=0;this.result=null;
-    this.skills=new SoldierSkills(this);
+    this.skills=new SoldierSkills(this);this.boss=new RaidBoss(this);
     this.beacon={...BEACON,id:'beacon',y:terrainHeight(BEACON.x,BEACON.z),hp:BEACON.maxHp,alive:true,height:2};
   }
   get active(){return ['preparing','fighting','interval'].includes(this.phase);}
@@ -43,17 +44,31 @@ export class Raids {
   toggleOrder(){if(!this.active)return {accepted:false,reason:'전투 중에 주민에게 지시할 수 있어요.'};this.order=this.order==='fight'?'rally':'fight';for(const a of this.allies){a.windup=0;a.action=null;a.followup=null;a.navClock=0;}return {accepted:true,message:this.order==='rally'?'주민들이 내게 모여요. 가까운 적에게만 대응합니다.':'교전 명령 · 주민들이 주변 적과 싸웁니다.'};}
   spawnWave(){
     const difficulty=1+Math.min(3,this.village.raidWins[this.mode])*.08;
-    const kinds=this.mode==='assault'?['guard','guard','melee','archer','archer','captain']:this.wave===1?['guard','melee','melee','archer','archer']:['guard','guard','melee','melee','archer','archer','captain'];
+    const kinds=RAID_WAVES[this.mode][this.wave-1];
     kinds.forEach((style,i)=>{
-      const x=this.mode==='assault'?(style==='captain'?-35:-25-Math.floor(i/3)*4):1-Math.floor(i/3)*2.1;
-      const z=this.mode==='assault'?15+(i%3-1)*3.2:15+(i%3-1)*2;
-      const maxHp=Math.round((style==='captain'?240:style==='guard'?165:style==='archer'?78:110)*difficulty);
-      const e={id:`raider-${++this.serial}`,kind:'raider',raider:true,style,power:difficulty,name:style==='captain'?'붉은발 전사 대장':style==='guard'?'붉은발 방패병':style==='archer'?'붉은발 궁수':'붉은발 전사',x,z,y:terrainHeight(x,z),homeX:x,homeZ:z,
-        hp:maxHp,maxHp,alive:true,radius:style==='captain'?.55:.4,height:style==='captain'?2.3:1.9,heading:Math.PI/2,hop:0,flash:0,windup:0,recovery:1+i*.2,stagger:0,offBalance:0,knockX:0,knockZ:0,knockback:null,lastPush:null,step:0,variant:0,moving:false,alert:true,
-        damage:Math.round((style==='captain'?23:style==='archer'?12:14)*difficulty),range:style==='archer'?9:style==='captain'?2.5:1.75,interval:style==='captain'?2.6:2.2};
-      this.skills.init(e,i);this.enemies.push(e);this.combat.entities.push(e);
+      const x=this.mode==='assault'?(style==='captain'?-34:-25-Math.floor(i/5)*4):(style==='captain'?2:-1-Math.floor(i/5)*2.3);
+      const z=style==='captain'?15:15+(i%5-2)*2.5;
+      const e=this.spawnEnemy(style,x,z,difficulty,i);if(style==='captain')this.boss.attach(e);
     });
-    this.phase='fighting';this.combat.events.push({type:'raid-notice',message:this.mode==='defense'?`${this.wave}/2차 습격 · 서쪽 문을 지켜 주세요!`:'붉은발 대장을 포함한 적 6명을 처치하세요.'});
+    this.phase='fighting';this.combat.events.push({type:'raid-notice',message:`${this.wave}/3차 ${this.mode==='defense'?'습격':'진격'} · ${kinds.length}명${this.wave===3?' · 우두머리 등장!':''}`});
+  }
+  spawnEnemy(style,x,z,difficulty=1,index=0){
+    const boss=style==='captain',radius=boss?.68:.4;
+    if(!this.nav.clear(x,z,radius)){const cell=this.nav.cell({x,z});if(cell!==null)({x,z}=this.nav.point(cell));}
+    const maxHp=Math.round((boss?(this.mode==='defense'?2800:3200):style==='guard'?180:style==='archer'?92:132)*difficulty);
+    const e={id:`raider-${++this.serial}`,kind:'raider',raider:true,boss,ccImmune:boss,style,power:difficulty,name:boss?'붉은발 우두머리 · 바르칸':style==='guard'?'붉은발 방패병':style==='archer'?'붉은발 궁수':'붉은발 전사',x,z,y:terrainHeight(x,z),homeX:x,homeZ:z,
+      hp:maxHp,maxHp,alive:true,radius,height:boss?3.1:1.9,heading:Math.PI/2,hop:0,flash:0,windup:0,recovery:1+index*.2,stagger:0,offBalance:0,knockX:0,knockZ:0,knockback:null,lastPush:null,step:0,variant:0,moving:false,alert:true,
+      damage:Math.round((style==='archer'?15:18)*difficulty),range:style==='archer'?10:1.9,interval:2.2};
+    this.skills.init(e,index);this.enemies.push(e);this.combat.entities.push(e);return e;
+  }
+  spawnReinforcements(unit,phase){
+    const styles=phase===3?['guard','guard','archer','archer']:['melee','melee','archer','archer'];
+    styles.forEach((style,i)=>this.spawnEnemy(style,this.mode==='defense'?-3:-28,10+i*3,unit.power,i));
+  }
+  regroup(){
+    for(const a of this.allies){a.alive=true;a.hp=Math.min(a.maxHp,Math.max(a.hp,a.maxHp*.35)+a.maxHp*.2);a.retreating=false;a.windup=0;this.skills.init(a);}
+    this.combat.hp=Math.min(this.combat.maxHp,this.combat.hp+this.combat.maxHp*.25);
+    this.enemies=this.enemies.filter(e=>e.alive);this.combat.entities=this.combat.entities.filter(e=>!e.raider||e.alive);this.bolts=[];this.boss.clear();
   }
   visible(a,b){return Math.abs((a.y??0)-(b.y??0))<3&&this.combat.unobstructed({x:a.x,y:(a.y??0)+1,z:a.z},{x:b.x,y:(b.y??0)+1,z:b.z});}
   playerTarget(player){return {id:'player',...player,hp:this.combat.hp,maxHp:this.combat.maxHp,alive:this.combat.hp>0};}
@@ -66,7 +81,7 @@ export class Raids {
     }
     if(!target.alive)return false;
     if(target.dodge&&target.dodge.elapsed<BATTLE.evade.invulnerable)return false;
-    const guard=guardedDamage(target,Math.max(1,amount-(target.style==='guard'?4:0)),context.dx??0,context.dz??0),damage=guard.damage;target.hp=Math.max(0,target.hp-damage);target.flash=.22;
+    const guard=guardedDamage(target,Math.max(1,amount-(target.style==='guard'&&!context.ground?4:0)),context.dx??0,context.dz??0),damage=guard.damage;target.hp=Math.max(0,target.hp-damage);target.flash=.22;
     if(context.stagger){target.stagger=Math.max(target.stagger??0,context.stagger);target.windup=0;}
     this.combat.events.push({type:'ally-hit',x:target.x,y:target.y+2,z:target.z,damage});
     if(target.hp===0){target.alive=false;target.windup=0;target.moving=false;this.combat.events.push({type:'raid-notice',message:target.id==='beacon'?'마을 깃발이 쓰러졌어요.':`${target.name} 쓰러짐 · 전투 후 회복`});}
@@ -99,7 +114,8 @@ export class Raids {
     }return true;
   }
   updateAlly(a,index,dt,player){
-    a.moving=false;a.cooldown=Math.max(0,a.cooldown-dt);a.flash=Math.max(0,a.flash-dt);a.swing=Math.max(0,a.swing-dt);if(this.skills.tick(a,dt,player,true)||!a.alive)return;
+    a.moving=false;a.cooldown=Math.max(0,a.cooldown-dt);a.flash=Math.max(0,a.flash-dt);a.swing=Math.max(0,a.swing-dt);
+    const avoiding=this.boss.avoid(a,index,dt);if(this.skills.tick(a,dt,player,true)||!a.alive||avoiding)return;
     const anchor=this.mode==='defense'&&this.order==='fight'?{x:a.spot[0],z:a.spot[1]}:{x:player.x+Math.cos(index*2.4)*2.3,z:player.z+Math.sin(index*2.4)*2.3};
     if(a.hp<a.maxHp*.25)a.retreating=true;else if(a.hp>a.maxHp*.55)a.retreating=false;
     if(a.retreating){a.windup=0;const rear=this.mode==='defense'?{x:20,z:18}:anchor;if(distance(a,rear)>1)this.nav.move(a,rear,3.1,dt);if(a.style==='healer')this.heal(a,player,dt);return;}
@@ -115,6 +131,7 @@ export class Raids {
     }else{a.windup=0;if(distance(a,anchor)>.7)this.nav.move(a,anchor,3,dt);}
   }
   updateEnemy(e,dt,player){
+    if(e.boss)return;
     e.moving=false;e.swing=Math.max(0,(e.swing??0)-dt);if(this.skills.tick(e,dt,player,false)||!e.alive||e.knockback||e.stagger>0)return;
     const friends=this.friendlies(player);
     if(this.mode==='defense')friends.push(this.beacon);
@@ -139,7 +156,7 @@ export class Raids {
     }this.bolts=this.bolts.filter(b=>b.life>0);
   }
   separate(dt){
-    const units=[...this.allies,...this.enemies].filter(a=>a.alive&&!a.knockback&&!(a.stagger>0));
+    const units=[...this.allies,...this.enemies].filter(a=>a.alive&&!a.boss&&!a.knockback&&!(a.stagger>0));
     for(let i=0;i<units.length;i++)for(let j=i+1;j<units.length;j++){
       const a=units[i],b=units[j],dx=b.x-a.x,dz=b.z-a.z,d=Math.hypot(dx,dz),gap=.72;if(d>=gap)continue;
       const nx=d>.001?dx/d:1,nz=d>.001?dz/d:0,push=Math.min((gap-d)*.5,dt*.9);
@@ -151,9 +168,10 @@ export class Raids {
     if(!this.active)return;this.elapsed+=dt;
     if(this.combat.hp<=0){this.finish(false,'전투에서 쓰러졌어요.');return;}
     if(this.mode==='defense'&&!this.beacon.alive){this.finish(false,'마을 깃발을 지키지 못했어요.');return;}
-    if(this.elapsed>240){this.finish(false,'전투가 길어져 주민들과 철수했어요.');return;}
+    if(this.elapsed>480){this.finish(false,'8분이 지나 주민들과 철수했어요.');return;}
     const center=this.mode==='defense'?BEACON:CAMP;
     if(distance(player,center)>48){this.finish(false,'전장을 벗어나 철수했어요.');return;}
+    this.boss.update(dt,player);
     for(let i=0;i<this.allies.length;i++)this.updateAlly(this.allies[i],i,dt,player);
     if(this.phase==='preparing'||this.phase==='interval'){this.timer-=dt;if(this.timer<=0)this.spawnWave();}
     for(const e of this.enemies)this.updateEnemy(e,dt,player);
@@ -164,23 +182,24 @@ export class Raids {
     if(this.combat.hp<=0){this.finish(false,'전투에서 쓰러졌어요.');return;}
     if(this.mode==='defense'&&!this.beacon.alive){this.finish(false,'마을 깃발을 지키지 못했어요.');return;}
     if(this.phase==='fighting'&&this.enemies.every(e=>!e.alive)){
-      if(this.mode==='defense'&&this.wave<2){this.wave++;this.timer=6;this.phase='interval';this.combat.events.push({type:'raid-notice',message:'1차 방어 성공 · 6초 뒤 대장이 합류합니다.'});}
+      if(this.wave<RAID_WAVES[this.mode].length){this.regroup();this.wave++;this.timer=10;this.phase='interval';this.combat.events.push({type:'raid-notice',message:`전열 정비 · 체력 일부 회복 · 10초 뒤 ${this.wave===3?'우두머리 등장':this.wave+'차 병력 도착'}`});}
       else this.finish(true);
     }
   }
   finish(won,reason=''){
     if(!this.active)return;
-    const mode=this.mode;this.phase=won?'victory':'defeat';const reward=won?(mode==='defense'?{gold:40,timber:10,stone:5,roof:0}:{gold:65,timber:0,stone:10,roof:5}):null;
+    const mode=this.mode;this.phase=won?'victory':'defeat';const reward=won?{...RAID_REWARDS[mode]}:null;
     if(reward){this.village.gold=Math.min(999999,this.village.gold+reward.gold);for(const key of ['timber','stone','roof'])this.village.blocks[key]=Math.min(99999,this.village.blocks[key]+reward[key]);this.village.raidWins[mode]++;this.combat.progression?.add(mode);this.village.save();}
-    this.result={won,mode,reason,reward};this.cleanup();this.combat.warrior.cancel();this.combat.cancelDraw();
+    this.result={won,mode,reason,reward,bossStats:this.boss.unit?{...this.boss.stats}:null};this.cleanup();this.combat.warrior.cancel();this.combat.cancelDraw();
     this.combat.events.push({type:'raid-result',message:won?`${mode==='defense'?'마을 방어':'야영지 공격'} 성공! +${reward.gold} 골드 · 건축 자재 획득`:reason+' 주민들은 모두 마을로 돌아왔어요.'});
   }
   abort(){if(this.active)this.finish(false,'전투를 중단했어요.');}
   cleanup(){
+    this.boss.clear();
     this.combat.entities=this.combat.entities.filter(e=>!e.raider);this.enemies=[];this.bolts=[];this.trails=[];
     for(const a of this.allies){const original=RESIDENTS.find(n=>n.id===a.id);Object.assign(a,{...original,x:original.x,z:original.z,y:terrainHeight(original.x,original.z),alive:true,hp:a.maxHp,battle:false,moving:false,windup:0,swing:0,step:0,wait:1,routeIndex:0,path:[]});this.skills.init(a);}
     this.allies=[];
   }
-  state(){return {active:this.active,mode:this.mode,phase:this.phase,wave:this.wave,timer:Math.max(0,+this.timer.toFixed(1)),order:this.order,remaining:this.enemies.filter(e=>e.alive).length,beaconHp:Math.ceil(this.beacon.hp),wins:{...this.village.raidWins},result:this.result,
-    allies:this.allies.map(a=>({id:a.id,name:a.name,role:a.combatRole,health:Math.ceil(a.hp),maxHp:a.maxHp,alive:a.alive,retreating:a.retreating,x:+a.x.toFixed(2),z:+a.z.toFixed(2),skills:this.skills.state(a)})),enemies:this.enemies.map(e=>({id:e.id,name:e.name,health:e.hp,alive:e.alive,x:e.x,z:e.z,skills:this.skills.state(e)}))};}
+  state(){return {active:this.active,mode:this.mode,phase:this.phase,wave:this.wave,totalWaves:3,timer:Math.max(0,+this.timer.toFixed(1)),order:this.order,remaining:this.enemies.filter(e=>e.alive).length,beaconHp:Math.ceil(this.beacon.hp),wins:{...this.village.raidWins},result:this.result,boss:this.boss.state(),
+    allies:this.allies.map(a=>({id:a.id,name:a.name,role:a.combatRole,health:Math.ceil(a.hp),maxHp:a.maxHp,alive:a.alive,retreating:a.retreating,avoiding:a.avoiding,x:+a.x.toFixed(2),z:+a.z.toFixed(2),skills:this.skills.state(a)})),enemies:this.enemies.map(e=>({id:e.id,name:e.name,health:e.hp,alive:e.alive,boss:!!e.boss,x:e.x,z:e.z,skills:this.skills.state(e)}))};}
 }

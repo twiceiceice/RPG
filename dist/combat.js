@@ -82,13 +82,14 @@ export class Hunting {
     if(!e.alive||damage<=0)return;
     if(e.dodge&&e.dodge.elapsed<BATTLE.evade.invulnerable)return {damage:0,critical:false,killed:false,evaded:true};
     if(e.raider){
-      if(context.source==='kick'){e.guardBroken=4;this.events.push({type:'guard-break',x:e.x,y:e.y+2,z:e.z});}
+      if(context.source==='kick'){if(e.boss)this.raids?.boss.interrupt(e);else{e.guardBroken=4;this.events.push({type:'guard-break',x:e.x,y:e.y+2,z:e.z});}}
+      if(e.exposed>0)damage=Math.round(damage*1.4);
       const guard=guardedDamage(e,damage,dx,dz);damage=guard.damage;
       if(guard.blocked)this.events.push({type:'guard-block',x:e.x,y:e.y+2,z:e.z});
     }
     const critical=(!context.preserveOpening&&e.offBalance>0)||context.forceCritical===true;
     if(critical){damage=Math.round(damage*this.criticalMultiplier);e.offBalance=0;this.criticalHits++;}
-    e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=dx*4;e.knockZ=dz*4;
+    e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=e.ccImmune?0:dx*4;e.knockZ=e.ccImmune?0:dz*4;
     this.lastHit={targetId:e.id,damage,critical,time:this.time,...context};
     this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height+e.hop,z:e.z,damage,critical,kind:e.kind,...context});
     if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;if(e.kind in this.kills)this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});this.progression?.add(e.style==='captain'?'captain':e.kind);if(this.hp>0)this.hp=Math.min(this.maxHp,this.hp+(this.progression?.bonuses.healOnKill??0));this.village?.rewardKill(e);}
@@ -100,7 +101,7 @@ export class Hunting {
     this.events.push({type:'off-balance',id:e.id,kind:e.kind,x:e.x,y:e.y+(e.kind==='tree'?1.5:e.height),z:e.z});
   }
   launchEntity(e,dx,dz,power) {
-    if(!e.alive||e.kind==='tree')return;
+    if(!e.alive||e.kind==='tree'||e.ccImmune)return;
     const length=Math.hypot(dx,dz)||1;
     e.knockX=e.knockZ=0;e.windup=0;e.stagger=power.duration+1.15;e.recovery=e.stagger;
     e.knockback={dx:dx/length,dz:dz/length,elapsed:0,...power};

@@ -40,7 +40,9 @@ export class GameAudio{
     if(!this.context||this.context.state!=='running'||!this.playing||!this.settings.enabled||document.hidden)return;
     const t=this.context.currentTime,skill=event.skill,type=event.type;
     const group=type==='hit'?'hit':type;if(t-(this.last[group]??-100)<(type==='hit'?.075:.025))return;this.last[group]=t;
-    if(type==='evade')this.noiseSound(t,.22,.22,1700,350);
+    if(type==='boss-warning'){this.tone(event.pattern==='horn'?360:190,t,.26,.14,'triangle',this.effects,event.pattern==='horn'?540:140);this.tone(250,t+.22,.20,.1,'sine');}
+    else if(type==='boss-impact'){this.tone(80,t,.35,.2,'sine',this.effects,30);this.noiseSound(t,.24,.16,550,90);}
+    else if(type==='evade')this.noiseSound(t,.22,.22,1700,350);
     else if(type==='battlecry'||type==='soldier-buff'){this.tone(130,t,.55,.22,'triangle',this.effects,220);this.tone(195,t+.05,.45,.12,'sine',this.effects,330);}
     else if(type==='guard-break'){this.noiseSound(t,.18,.24,1300,170);this.tone(240,t,.2,.16,'triangle',this.effects,80);}
     else if(type==='guard-block')this.tone(700,t,.12,.10,'triangle',this.effects,350);

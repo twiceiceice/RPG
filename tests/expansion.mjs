@@ -79,7 +79,13 @@ test('all ten defenders and seven expedition members stage in accessible positio
 });
 test('new melee and ranged allies can attack, and victory grants XP only once',()=>{
   const s=setup();s.r.start('assault',s.p);s.r.spawnWave();for(const id of ['daon','roan','lua']){const a=s.r.allies.find(a=>a.id===id),e=s.r.enemies[0];Object.assign(a,{x:-28,z:15,y:0});Object.assign(e,{x:-29,z:15,y:0,hp:999,alive:true});s.r.strike(a,e,s.p,true);if(a.style==='archer'){assert.ok(s.r.bolts.length);s.r.updateBolts(.06,s.p);}assert.ok(e.hp<999,id+' deals damage');}
-  for(const e of s.r.enemies)s.h.damageEntity(e,10000,0,0,{source:'ally'});const before=s.progression.xp;s.r.update(.01,s.p);assert.equal(s.r.phase,'victory');assert.equal(s.progression.xp,before+180);const paid=s.progression.xp;s.r.finish(true);assert.equal(s.progression.xp,paid);
+  for(let wave=1;wave<=3;wave++){
+    for(const e of s.r.enemies)s.h.damageEntity(e,10000,0,0,{source:'ally'});
+    const before=s.progression.xp;s.r.update(.01,s.p);
+    if(wave<3){assert.equal(s.r.phase,'interval');assert.equal(s.progression.xp,before);s.r.update(10.01,s.p);}
+    else{assert.equal(s.r.phase,'victory');assert.equal(s.progression.xp,before+420);}
+  }
+  const paid=s.progression.xp;s.r.finish(true);assert.equal(s.progression.xp,paid);
 });
 const parameter=()=>({value:0,setValueAtTime(v){assert.ok(Number.isFinite(v));},exponentialRampToValueAtTime(v){assert.ok(Number.isFinite(v)&&v>0);},setTargetAtTime(v){assert.ok(Number.isFinite(v));}});
 const node=()=>({gain:parameter(),frequency:parameter(),Q:parameter(),threshold:parameter(),ratio:parameter(),connect(){},disconnect(){},start(){},stop(){this.onended?.();}});

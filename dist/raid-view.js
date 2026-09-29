@@ -2,6 +2,7 @@ import * as THREE from './vendor/three.module.js';
 import {terrainHeight} from './movement.js';
 import {CAMP,BEACON,ALLY_ROLES} from './raid-data.js';
 import {BATTLE,soldierRole} from './battle-rules.js';
+import {RaidBossView} from './raid-boss-view.js';
 const mat=(color)=>new THREE.MeshStandardMaterial({color,roughness:.82});
 const wood=mat(0x664932),steel=mat(0xb8c4bf),dark=mat(0x353d36),red=mat(0xa04d42),gold=mat(0xd7ae62);
 function box(parent,m,x,y,z,w,h,d){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
@@ -70,7 +71,7 @@ function updateWarning(view,unit){
 }
 function fighter(scene,e){
   const root=new THREE.Group(),body=new THREE.Group();root.add(body);scene.add(root);
-  const coat=mat(e.style==='captain'?0x653e36:0x9c5948),skin=mat(0xbb9775);const scale=e.style==='captain'?1.2:1;
+  const coat=mat(e.style==='captain'?0x653e36:0x9c5948),skin=mat(0xbb9775);const scale=e.boss?1.6:e.style==='captain'?1.2:1;
   body.scale.setScalar(scale);box(body,coat,0,1.05,0,.6,.7,.4);box(body,wood,0,.78,0,.65,.12,.43);box(body,skin,0,1.62,0,.45,.45,.42);box(body,dark,0,1.87,0,.51,.17,.48);
   for(const side of [-1,1])box(body,dark,side*.1,1.65,.217,.05,.06,.02);
   if(e.style==='captain'){box(body,gold,0,1.99,0,.53,.08,.44);for(const side of [-1,1])box(body,steel,side*.47,1.43,0,.32,.24,.5);}
@@ -78,7 +79,7 @@ function fighter(scene,e){
   for(const s of [-1,1]){const arm=new THREE.Group();body.add(arm);arm.position.set(s*.4,1.4,0);box(arm,coat,0,-.24,0,.23,.55,.25);box(arm,skin,0,-.55,0,.20,.14,.22);arms.push(arm);const leg=new THREE.Group();body.add(leg);leg.position.set(s*.17,.77,0);box(leg,dark,0,-.38,0,.25,.75,.3);legs.push(leg);}
   const held=weapon(e.style);held.position.y=-.5;arms[1].add(held);
   const shield=box(arms[0],steel,0,-.25,.2,.75,.95,.16);shield.visible=e.style==='guard';
-  const name=label(e.name,'#ffd3b4');name.position.y=3.1;root.add(name);
+  const name=label(e.name,'#ffd3b4');name.position.y=e.boss?4:3.1;root.add(name);
   const proxy=new THREE.Mesh(new THREE.SphereGeometry(.68,8,6),new THREE.MeshBasicMaterial({visible:false}));proxy.position.y=e.height*.5;proxy.userData.entityId=e.id;root.add(proxy);
   const telegraph=new THREE.Mesh(new THREE.RingGeometry(e.style==='captain'?2.6:1.4,e.style==='captain'?3:1.7,32),new THREE.MeshBasicMaterial({color:0xf17c52,transparent:true,opacity:.7,side:THREE.DoubleSide,depthWrite:false}));telegraph.rotation.x=-Math.PI/2;scene.add(telegraph);
   return {root,body,arms,legs,coat,name,proxy,shield,telegraph,warning:skillWarning(scene,false),bar:healthBar(scene)};
@@ -86,7 +87,7 @@ function fighter(scene,e){
 function disposeObject(root){root.traverse(o=>{o.geometry?.dispose();if(o.material){const materials=Array.isArray(o.material)?o.material:[o.material];for(const m of materials){if([wood,steel,dark,red,gold].includes(m))continue;m.map?.dispose();m.dispose();}}});root.removeFromParent();}
 export class RaidView {
   constructor(scene,camera,raids,villageView,huntingView,scenery){
-    Object.assign(this,{scene,camera,raids,villageView,huntingView,scenery});this.enemies=new Map();this.friends=new Map();
+    Object.assign(this,{scene,camera,raids,villageView,huntingView,scenery});this.enemies=new Map();this.friends=new Map();this.bossView=new RaidBossView(scene,raids.boss);
     for(const [id,a] of villageView.actors){const held=weapon(ALLY_ROLES[id].style);held.position.y=-.45;a.arms[1].add(held);held.visible=false;
       const shield=box(a.arms[0],mat(0x638b80),0,-.30,.17,.55,.7,.12);shield.visible=false;
       const battleName=label(raids.village.residents.find(n=>n.id===id).name,'#bce6c8');battleName.position.y=2.65;battleName.scale.set(1.25,.26,1);battleName.visible=false;a.root.add(battleName);
@@ -115,11 +116,13 @@ export class RaidView {
     if(n.dodge){a.body.rotation.x=-n.dodge.elapsed/BATTLE.evade.duration*Math.PI*2;a.body.position.y=.25;}
   }
   update(){
+    this.bossView.update();
     const ids=new Set(this.raids.enemies.map(e=>e.id));
     for(const [id,v] of this.enemies)if(!ids.has(id)){this.huntingView.proxies=this.huntingView.proxies.filter(p=>p!==v.proxy);disposeObject(v.root);disposeObject(v.bar.root);disposeObject(v.telegraph);disposeObject(v.warning.root);this.enemies.delete(id);}
     for(const e of this.raids.enemies){
       let v=this.enemies.get(e.id);if(!v){v=fighter(this.scene,e);this.enemies.set(e.id,v);this.huntingView.proxies.push(v.proxy);}
       v.root.visible=e.alive;v.root.position.set(e.x,e.y,e.z);v.root.rotation.y=e.heading;this.pose(v,e);v.coat.emissive.setHex(e.flash>0?0x555555:e.battlecry>0?0x603010:0);this.bar(v.bar,e,false);updateWarning(v.warning,e);v.shield.rotation.z=e.guardBroken>0?.8:0;
+      if(e.boss){const cast=this.raids.boss.cast;v.coat.emissive.setHex(e.flash>0?0x555555:e.exposed>0?0x675222:0);if(cast){v.arms[1].rotation.x=cast.id==='horn'?-1.9:-2.7;v.arms[0].rotation.x=cast.id==='horn'?-1.9:-1.1;v.body.rotation.x=-.12;}}
       v.proxy.position.y=e.height*.5+e.hop;v.name.visible=e.style==='captain';v.name.scale.set(2.25,.47,1);v.telegraph.visible=e.alive&&e.windup>0;v.telegraph.position.set(e.x,e.y+.045,e.z);
       v.telegraph.material.opacity=.3+.5*Math.sin(this.raids.elapsed*18)**2;
     }

@@ -1,5 +1,8 @@
 export const CAMP={name:'붉은발 야영지',x:-32,z:15,halfX:12,halfZ:12,entry:{x:-17,z:15}};
-export const BEACON={x:21,z:15,maxHp:260};
+export const BEACON={x:21,z:15,maxHp:350};
+const squad=(guards,warriors,archers)=>[...Array(guards).fill('guard'),...Array(warriors).fill('melee'),...Array(archers).fill('archer')];
+export const RAID_WAVES={defense:[squad(3,6,3),squad(4,7,5),[...squad(3,3,3),'captain']],assault:[squad(3,4,3),squad(3,5,4),[...squad(2,2,2),'captain']]};
+export const RAID_REWARDS={defense:{gold:100,timber:24,stone:14,roof:4},assault:{gold:150,timber:0,stone:25,roof:12}};
 export const ALLY_ROLES={
   hari:{role:'방패병',style:'guard',maxHp:180,damage:17,range:1.9,interval:2,spot:[14,15]},
   doyun:{role:'전사',style:'melee',maxHp:135,damage:22,range:1.9,interval:2.3,spot:[16,12.8]},

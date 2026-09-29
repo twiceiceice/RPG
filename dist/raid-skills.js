@@ -49,7 +49,7 @@ export class SoldierSkills {
       let accepted;
       if(a.friendly){
         const result=this.raids.combat.damageEntity(target,Math.round(base),a.dx,a.dz,{source:'ally',skill:a.id,preserveOpening:true});accepted=!!result&&!result.evaded;
-        if(accepted&&target.alive){target.stagger=Math.max(target.stagger,Math.min(rule.stagger,.7));target.windup=0;}
+        if(accepted&&target.alive&&!target.ccImmune){target.stagger=Math.max(target.stagger,Math.min(rule.stagger,.7));target.windup=0;}
       }else accepted=this.raids.hitAlly(target,Math.round(base),{dx:a.dx,dz:a.dz,skill:a.id,stagger:Math.min(rule.stagger,.35)});
       if(accepted)hits++;
     }
