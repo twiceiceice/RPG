@@ -3,6 +3,7 @@ import { KickPower } from './kick-power.js';
 
 export const SPIN = Object.freeze({ duration: 2.5, maxDuration: 4, interval: .25, radius: 3.2, pullRadius: 6, pullSpeed: 6, damage: 8, empoweredDamage: 10, criticalExtension: .25, killExtension: .5 });
 const comboOrder = ['charge', 'slam', 'kick', 'sweep'];
+const aimsOnStart = id => id === 'kick' || id === 'sweep';
 export const WARRIOR_SKILLS = [
   { id: 'charge', key: '1', name: '돌진', detail: '전방으로 돌파', duration: .52, cooldown: 4 },
   { id: 'slam', key: '2', name: '내려찍기', detail: '날을 세워 땅에 내려찍기', duration: 1.08, cooldown: 3.5 },
@@ -17,6 +18,7 @@ export class Warrior {
   constructor(combat) {
     this.combat = combat; this.cooldowns = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, 0]));
     this.active = null; this.planted = null; this.queued = null; this.lastSkill = null;
+    this.aimDirection = null;
     this.kickPower = new KickPower(); this.lastKick = null;
     this.combo = { step: 0, remaining: 0, failure: null };
     this.ultimate = { ready: false, lastSpin: null };
@@ -43,6 +45,7 @@ export class Warrior {
   }
   request(id, player, direction) {
     if (!skillById[id]) return { accepted: false, reason: '알 수 없는 기술이에요.' };
+    this.setAim(direction);
     if (this.active) {
       if (this.combat.hp > 0 && !this.queued && followups[this.active.id].includes(id) && this.cooldowns[id] === 0 && (id !== 'spin' || this.ultimate.ready)) {
         this.queued = { id, direction: { ...direction } };
@@ -54,13 +57,24 @@ export class Warrior {
     if (reason) return { accepted: false, reason };
     this.start(id, player, direction); return { accepted: true, queued: false };
   }
+  setAim(direction) {
+    const length = Math.hypot(direction.x,direction.z);
+    if (Number.isFinite(length) && length > 1e-6) this.aimDirection = { x:direction.x/length,z:direction.z/length };
+  }
+  facing() {
+    if (this.active) return { x:this.active.dx,z:this.active.dz };
+    if (this.planted) return this.planted.facing ?? { x:this.planted.dx,z:this.planted.dz };
+    return null;
+  }
   start(id, player, direction) {
     const length = Math.hypot(direction.x, direction.z) || 1;
-    const facing = this.planted ? { x: this.planted.dx, z: this.planted.dz } : { x: direction.x / length, z: direction.z / length };
+    const facing = this.planted && !aimsOnStart(id) ? { x: this.planted.dx, z: this.planted.dz } : { x: direction.x / length, z: direction.z / length };
     const skill = skillById[id];
     this.active = { id, elapsed: 0, duration: skill?.duration ?? .58, dx: facing.x, dz: facing.z, hit: false, hitIds: new Set(), stopped: false,
       origin: { x: player.x, y: player.y, z: player.z }, launched: false, kickPower: null,
       anchor: this.planted ? { ...this.planted } : null };
+    // Keep the axe's world anchor intact while the warrior turns for a follow-up.
+    if (this.planted && aimsOnStart(id)) this.planted.facing = { ...facing };
     if (id === 'spin') {
       this.ultimate.ready = false; this.planted = null; this.combo = { step: 0, remaining: 0, failure: null };
       Object.assign(this.active, { stage: 1, nextPulse: SPIN.interval, streak: 0, pulses: 0, hits: 0, criticalPulses: 0, kills: 0, extended: 0 });
@@ -233,11 +247,15 @@ export class Warrior {
       else if (a.comboCounted && !this.ultimate.ready) this.combo.remaining = 3;
       this.active = null;
       const queued = this.queued; this.queued = null;
-      if (queued && !this.reason(queued.id, player)) this.start(queued.id, player, queued.direction);
+      if (queued && !this.reason(queued.id, player)) {
+        const direction = aimsOnStart(queued.id) ? this.aimDirection ?? queued.direction : queued.direction;
+        this.start(queued.id, player, direction);
+      }
     }
   }
   state() {
     return { class: 'warrior', activeSkill: this.active?.id ?? null, progress: this.active ? +(this.active.elapsed / this.active.duration).toFixed(3) : 0,
+      facing: this.facing(),
       axePlanted: !!this.planted, followupSeconds: this.planted ? +this.planted.remaining.toFixed(2) : 0, kicked: !!this.planted?.kicked,
       axeAnchor: this.planted ? { x: +this.planted.x.toFixed(2), y: +this.planted.y.toFixed(2), z: +this.planted.z.toFixed(2) } : null,
       lastKick: this.lastKick ? { ...this.lastKick } : null,

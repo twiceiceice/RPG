@@ -97,7 +97,7 @@ export class WarriorView {
     if (equipped) {
       avatar.arms.forEach(arm=>{arm.visible=false;});
       const a = w.active, id = a?.id, t = a ? a.elapsed/a.duration : 0, elapsed = a?.elapsed ?? 0;
-      const angle = avatar.root.rotation.y, dx = a?.dx ?? w.planted?.dx ?? Math.sin(angle), dz = a?.dz ?? w.planted?.dz ?? Math.cos(angle);
+      const angle = avatar.root.rotation.y, facing = w.facing(), dx = facing?.x ?? Math.sin(angle), dz = facing?.z ?? Math.cos(angle);
       const idle = () => this.placeLocal(player,dx,dz,-.20,.64,.30,.17,0,-.42,.20);
       idle();
       let flight = 0;
