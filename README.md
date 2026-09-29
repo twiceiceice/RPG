@@ -4,6 +4,8 @@
 
 ## 실행
 
+집이나 다른 컴퓨터에서 이어서 작업하려면 [HANDOFF.md](./HANDOFF.md)의 내려받기·실행 방법과 현재 개발 상태를 먼저 확인하세요.
+
 Node.js가 있는 환경에서 이 폴더를 열고 `npm ci` → `npm run build` → `npm start`를 실행한 뒤 http://127.0.0.1:4173 에 접속하세요. 이미 빌드된 다운로드 소스는 `node serve.mjs`만 실행해도 됩니다.
 
 게임 소스는 `dist/*.js`, 화면 원본은 `index.template.html`입니다. 게임이나 화면 원본을 수정하면 `npm run build`로 `dist/index.html`을 다시 만드세요. `dist/index.html`은 생성 파일입니다. 스타일은 `dist/style.css`에서 수정합니다.
