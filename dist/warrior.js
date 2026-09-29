@@ -37,7 +37,7 @@ export class Warrior {
     if (!player.grounded) return '땅에 발을 딛은 뒤 사용해 주세요.';
     if (id === 'spin' && !this.ultimate.ready) return '1 → 2 → 3 → 4를 모두 적중시키면 회전베기가 열려요.';
     if (this.cooldowns[id] > 0) return `${skillById[id].name} 재사용까지 ${this.cooldowns[id].toFixed(1)}초`;
-    if (this.combat.cooldown > 0) return '기본 공격이 끝나면 사용할 수 있어요.';
+    if (this.combat.cooldown > 0 && !this.combat.autoAttackRecovery) return '기본 공격이 끝나면 사용할 수 있어요.';
     if (['kick', 'sweep'].includes(id) && !this.planted) return '2번 내려찍기로 먼저 도끼를 박아 주세요.';
     if (id === 'kick' && this.planted?.kicked) return '4번 가로베기로 도끼를 뽑아 마무리하세요.';
     if (['charge', 'slam'].includes(id) && this.planted) return '4번 가로베기로 도끼를 먼저 뽑아 주세요.';
@@ -46,6 +46,13 @@ export class Warrior {
   request(id, player, direction) {
     if (!skillById[id]) return { accepted: false, reason: '알 수 없는 기술이에요.' };
     this.setAim(direction);
+    // A deliberate skill takes priority over an automatic swing, even mid-swing.
+    if (this.active?.id === 'slash' && this.active.automatic) {
+      const reason = this.reason(id, player);
+      if (reason) return { accepted: false, reason };
+      this.active = null; this.combat.cooldown = 0; this.combat.autoAttackRecovery = false;
+      this.start(id, player, direction); return { accepted: true, queued: false };
+    }
     if (this.active) {
       if (this.combat.hp > 0 && !this.queued && followups[this.active.id].includes(id) && this.cooldowns[id] === 0 && (id !== 'spin' || this.ultimate.ready)) {
         this.queued = { id, direction: { ...direction } };
@@ -55,6 +62,7 @@ export class Warrior {
     }
     const reason = this.reason(id, player);
     if (reason) return { accepted: false, reason };
+    if (this.combat.autoAttackRecovery) { this.combat.cooldown = 0; this.combat.autoAttackRecovery = false; }
     this.start(id, player, direction); return { accepted: true, queued: false };
   }
   setAim(direction) {
@@ -151,11 +159,12 @@ export class Warrior {
     input.forcedVelocity = null;
     if (this.active) {
       const a = this.active;
+      if (a.id === 'slash' && a.automatic) return;
       if (a.id === 'spin') {
         const length = Math.max(1, Math.hypot(input.x,input.z));
         input.forcedVelocity = { x: input.x/length*3.4, z: input.z/length*3.4 }; return;
       }
-      let speed = a.id === 'charge' && a.elapsed < .36 && !a.stopped ? 18 : 0;
+      let speed = a.id === 'charge' && a.elapsed < .36 && !a.stopped ? 27 : 0;
       if (a.id === 'kick' && a.elapsed >= .14 && a.elapsed < .66) speed = 6.2;
       if (a.id === 'sweep' && a.elapsed >= .76 && a.elapsed < 1.17) {
         speed = 4.5;
@@ -235,7 +244,7 @@ export class Warrior {
         const x = player.x + a.dx * reach, z = player.z + a.dz * reach;
         this.planted = { x, y: Math.max(player.y, terrainHeight(x, z)), z, dx: a.dx, dz: a.dz, remaining: 3.4, kicked: false };
         a.anchor = { ...this.planted };
-        this.hitArea(player, { x, z, radius: 1.65, damage: 26, cone: -.1, knock: .6, stagger: 1.65 }); this.impact(player, 'slam', x, z);
+        this.hitArea(player, { x, z, radius: 1.65, damage: 39, cone: -.1, knock: .6, stagger: 1.65 }); this.impact(player, 'slam', x, z);
       } else if (a.id === 'sweep') {
         this.hitArea(player, { radius: 4.3, damage: 38, cone: -.35, knock: 9, stagger: .9 }); this.impact(player, 'sweep'); this.planted = null;
       } else {

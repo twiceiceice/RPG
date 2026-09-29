@@ -67,6 +67,12 @@ export class WarriorView {
     this.trailGeometry.setAttribute('position',new THREE.BufferAttribute(this.trailVertices,3));
     this.trail = new THREE.Mesh(this.trailGeometry,new THREE.MeshBasicMaterial({color:0xffdb8b,transparent:true,opacity:.38,side:THREE.DoubleSide,depthWrite:false}));
     this.trail.frustumCulled=false;this.trail.visible=false;scene.add(this.trail);
+    // A broad, layered cut follows the full skill arc; basic swings keep a short trail.
+    this.sweepVfx = new THREE.Group(); scene.add(this.sweepVfx); this.sweepVfx.visible=false;
+    this.sweepBands = [[1.9,4.18,0xffb348,.40],[3.94,4.3,0xfff1bd,.85],[3.55,3.66,0xffd77b,.55]].map(([inner,outer,color,opacity],i)=>{
+      const band=mesh(this.sweepVfx,new THREE.RingGeometry(inner,outer,64,1,-1.93,3.86),new THREE.MeshBasicMaterial({color,transparent:true,opacity,side:THREE.DoubleSide,depthWrite:false}),0,0,i*.025);
+      band.castShadow=false;band.userData.opacity=opacity;return band;
+    });
     this.spinVfx = new THREE.Group(); scene.add(this.spinVfx); this.spinVfx.visible = false;
     this.spinRings = Array.from({length:3},(_,i)=>{
       const ring = mesh(this.spinVfx,new THREE.RingGeometry(2.65+i*.12,SPIN.radius,64,1,0,Math.PI*1.45),new THREE.MeshBasicMaterial({color:0xffd782,transparent:true,opacity:.35,side:THREE.DoubleSide,depthWrite:false}),0,.35+i*.4,0);
@@ -119,17 +125,24 @@ export class WarriorView {
         avatar.legs[0].rotation.x = -.88*flight; avatar.legs[1].rotation.x = -1.48*flight;
         avatar.legs[0].rotation.z = .17*flight; avatar.legs[1].rotation.z = -.07*flight;
       } else if (id === 'sweep') {
-        const wind=ease(elapsed/.28), recall=ease((elapsed-.08)/.66), swing=ease((elapsed-.74)/.48), recover=ease((elapsed-1.26)/.39);
-        this.placeLocal(player,dx,dz,mix(-.08,-.2,recover),mix(1.05,.64,recover),mix(.14,.30,recover),mix(Math.PI/2,.17,recover),mix(-1.85+swing*3.70,0,recover),mix(0,-.42,recover),.20*recover);
+        const wind=ease(elapsed/.80), recall=ease((elapsed-.08)/.66);
+        const swing=.5*ease((elapsed-.90)/.16)+.5*ease((elapsed-1.06)/.17), recover=ease((elapsed-1.26)/.39);
+        const arc=-2.35+swing*4.70, drive=Math.sin(swing*Math.PI), brace=wind*(1-recover);
+        // Extend both hands away from the chest and whip the blade through the front
+        // at the damage frame, then carry the torso into a pronounced follow-through.
+        this.placeLocal(player,dx,dz,mix(Math.sin(arc)*.48,-.2,recover),mix(.95+drive*.16,.64,recover),mix(.18+Math.cos(arc)*.32,.30,recover),mix(Math.PI/2,.17,recover),mix(arc,0,recover),mix(0,-.42,recover),.20*recover);
         if (elapsed < .74) {
           // Bring the axe to the warrior so the combo keeps its forward momentum.
           this.blendPosition.copy(this.axe.position); this.blendRotation.copy(this.axe.quaternion);
           this.placePlanted(a.anchor,Math.sin(recall*Math.PI)*.60);
           this.axe.position.lerp(this.blendPosition,recall);this.axe.quaternion.slerp(this.blendRotation,recall);
         }
-        avatar.body.rotation.y=mix(-wind+swing*2.15,0,recover);
-        avatar.body.rotation.z=-.13*Math.sin(swing*Math.PI);avatar.body.position.y=-.10*Math.sin(swing*Math.PI);
-        avatar.legs[0].rotation.x=-.30*Math.sin(swing*Math.PI);avatar.legs[1].rotation.x=.22*Math.sin(swing*Math.PI);
+        avatar.body.rotation.y=mix(-1.35*wind+swing*3.65,0,recover);
+        avatar.body.rotation.x=.20*brace+.14*drive;
+        avatar.body.rotation.z=(-.20*wind+.38*swing)*(1-recover);
+        avatar.body.position.y=-.23*brace+.10*drive;
+        avatar.legs[0].rotation.x=(-.55+.90*swing)*brace;avatar.legs[1].rotation.x=(.35-.95*swing)*brace;
+        avatar.legs[0].rotation.z=.17*brace;avatar.legs[1].rotation.z=-.17*brace;
       } else if (id === 'spin') {
         const turn=elapsed*Math.PI*5, wind=ease(elapsed/.14), settle=ease((elapsed-(a.duration-.14))/.14);
         const spinAngle=angle+turn;
@@ -165,7 +178,10 @@ export class WarriorView {
       this.firstAxe.scale.setScalar(.67); this.firstAxe.position.set(.25,-.68,-1.28);
       this.camera.getWorldQuaternion(this.cameraRotation);this.firstAxe.quaternion.copy(this.cameraRotation.invert()).multiply(this.axe.quaternion);
       if (id==='slam') this.firstAxe.position.set(.25*(1-ease(elapsed/.43)),-.68+ease(elapsed/.43)*.27,-1.34);
-      if (id==='sweep') this.firstAxe.position.set(.15-Math.sin(ease((elapsed-.74)/.48)*Math.PI)*.40,-.48,-1.35);
+      if (id==='sweep') {
+        const swing=.5*ease((elapsed-.90)/.16)+.5*ease((elapsed-1.06)/.17),recover=ease((elapsed-1.26)/.39);
+        this.firstAxe.position.set(mix(.75-swing*1.5,.25,recover),mix(-.46-Math.sin(swing*Math.PI)*.10,-.68,recover),mix(-1.24-Math.sin(swing*Math.PI)*.32,-1.28,recover));
+      }
       if (id==='spin') { this.firstAxe.position.set(Math.sin(elapsed*Math.PI*5)*.46,-.78,-1.36); this.firstAxe.scale.setScalar(.54); }
       this.firstBoots.forEach((boot,i)=>{boot.visible=id==='kick';boot.position.set((i?1:-1)*.20,-.70+flight*.64,-.68-flight*.40);boot.rotation.x=-flight*.45;});
     }
@@ -178,6 +194,16 @@ export class WarriorView {
       this.windLines.forEach(line=>{line.visible=spin.stage===2;line.material.opacity=fade*.55;});
       this.trail.material.color.setHex(color);
     } else this.trail.material.color.setHex(0xffdb8b);
+    const sweep=w.active?.id==='sweep'?w.active:null;
+    this.sweepVfx.visible=equipped&&!!sweep&&sweep.elapsed>.90&&sweep.elapsed<1.46;
+    if(this.sweepVfx.visible) {
+      const elapsed=sweep.elapsed,cut=.5*ease((elapsed-.90)/.16)+.5*ease((elapsed-1.06)/.17);
+      const fade=ease((elapsed-.90)/.06)*(1-ease((elapsed-1.23)/.23));
+      this.sweepVfx.position.set(player.x,player.y+.96,player.z);
+      this.sweepVfx.rotation.set(-Math.PI/2,0,Math.atan2(-sweep.dz,sweep.dx));
+      this.sweepBands.forEach(band=>{band.material.opacity=band.userData.opacity*fade;band.geometry.setDrawRange(0,Math.ceil(cut*64)*6);});
+    }
+    this.trail.material.opacity=sweep?.72:.38;
     this.updateTrail(dt,paused,firstPerson,equipped);
     for (const e of this.effects) {
       if (!paused) e.life -= dt;
@@ -191,9 +217,9 @@ export class WarriorView {
     const a=this.warrior.active,elapsed=a?.elapsed??0;
     if(!paused){
       this.trailSamples=this.trailSamples.filter(s=>(s.life-=dt)>0);
-      if(equipped&&(a?.id==='spin'||(a?.id==='slam'&&elapsed>.43&&elapsed<.69)||(a?.id==='sweep'&&elapsed>.74&&elapsed<1.26)||(a?.id==='slash'&&elapsed>.14&&elapsed<.42))){
+      if(equipped&&(a?.id==='spin'||(a?.id==='slam'&&elapsed>.43&&elapsed<.69)||(a?.id==='sweep'&&elapsed>.90&&elapsed<1.30)||(a?.id==='slash'&&elapsed>.14&&elapsed<.42))){
         this.axe.updateMatrixWorld(true);
-        this.trailSamples.push({outer:this.axe.localToWorld(new THREE.Vector3(-.72,1.65,0)),inner:this.axe.localToWorld(new THREE.Vector3(0,.85,0)),life:.17});
+        this.trailSamples.push({outer:this.axe.localToWorld(new THREE.Vector3(-.72,1.65,0)),inner:this.axe.localToWorld(new THREE.Vector3(0,a?.id==='sweep'?.35:.85,0)),life:a?.id==='sweep'?.24:.17});
         if(this.trailSamples.length>24)this.trailSamples.shift();
       }
     }

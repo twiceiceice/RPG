@@ -104,7 +104,7 @@ function equipWeapon(weapon) {
     $(id).classList.toggle('selected', selected); $(id).setAttribute('aria-pressed', String(selected));
   }
   $('weapon-name').textContent = axe ? '양손 도끼' : bow ? '들판의 활' : '여행자의 칼';
-  $('weapon-hint').textContent = axe ? '좌클릭 / F 기본 공격 · 1~5 기술' : bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '클릭 / F · 가까이서 베기';
+  $('weapon-hint').textContent = axe ? '근접 자동 공격 · 1~5 기술' : bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '근접 자동 공격 · 좌클릭 / F 직접 베기';
   $('warrior-hud').hidden = !axe;
   $('touch-attack').textContent = bow ? '당기기' : '공격';
   $('touch-attack').setAttribute('aria-label', bow ? '누르고 활 당기기, 놓으면 발사' : axe ? '도끼 기본 공격' : '칼로 공격');
@@ -314,7 +314,7 @@ function updateCamera(dt, immediate = false) {
     camera.lookAt(desired); return;
   }
   focus.set(player.x, player.y + 1.22, player.z);
-  const action = warrior.active, widen = !reduceMotion && action ? action.id==='spin' ? Math.min(1,action.elapsed/.2,(action.duration-action.elapsed)/.2)*1.3 : ['kick','sweep'].includes(action.id) ? Math.sin(action.elapsed/action.duration*Math.PI)*.85 : 0 : 0;
+  const action = warrior.active, widen = !reduceMotion && action ? action.id==='spin' ? Math.min(1,action.elapsed/.2,(action.duration-action.elapsed)/.2)*1.3 : ['kick','sweep'].includes(action.id) ? Math.sin(action.elapsed/action.duration*Math.PI)*(action.id==='sweep'?1.25:.85) : 0 : 0;
   desired.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(cameraDistance + widen).add(focus);
   const bow = hunting.weapon === 'bow';
   if (bow) { focus.y += .22; desired.y += .22; desired.x += Math.cos(yaw) * .68; desired.z -= Math.sin(yaw) * .68; }
@@ -332,7 +332,9 @@ function animateAvatar(dt, time) {
   avatar.legs.forEach(leg => { leg.rotation.z = 0; });
   if (warrior.active || warrior.planted) {
     const facing = warrior.facing(); avatar.root.rotation.y = Math.atan2(facing.x, facing.z);
-  } else if (hunting.weapon === 'bow' || hunting.swing > 0) {
+  } else if (hunting.swing > 0 && hunting.meleeFacing) {
+    avatar.root.rotation.y = Math.atan2(hunting.meleeFacing.x,hunting.meleeFacing.z);
+  } else if (hunting.weapon === 'bow') {
     avatar.root.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
   } else if (speed > .15) {
     const angle = Math.atan2(player.vx, player.vz);
@@ -356,7 +358,7 @@ function updateWarriorHUD() {
   const phaseLabels = {
     charge: '돌파', slam: elapsed < .43 ? '날 세우기' : elapsed < .64 ? '내려찍기' : '도끼 고정',
     kick: elapsed < .14 ? '도약' : elapsed < .70 ? '날아차기' : '착지',
-    sweep: elapsed < .52 ? '끌어오기' : elapsed < .74 ? '도끼 잡기' : elapsed < 1.26 ? '크게 베기' : '마무리',
+    sweep: elapsed < .52 ? '끌어오기' : elapsed < .90 ? '몸 틀기' : elapsed < 1.26 ? '크게 베기' : '마무리',
     spin: `${a?.stage ?? 1}단계 · ${Math.max(0,(a?.duration ?? 0)-elapsed).toFixed(1)}초`,
   };
   const ready = warrior.ultimate.ready, combo = warrior.combo, spinning = a?.id === 'spin';
@@ -382,7 +384,7 @@ function updateWarriorHUD() {
   const name = WARRIOR_SKILLS.find(s => s.id === a?.id)?.name;
   $('combo-title').textContent = a?.id === 'kick' && a.kickPower ? `날아차기 · ${a.kickPower.name} · ${a.kickPower.damage} 피해 / ${a.kickPower.distance}m 밀침` : name ?? (a?.id === 'slash' ? '기본 베기' : warrior.planted ? warrior.planted.kicked ? '뒤에 남은 도끼로 마무리' : '도끼가 박혔어요' : '양손 도끼 전사');
   $('combo-hint').textContent = warrior.queued ? `${WARRIOR_SKILLS.find(s=>s.id===warrior.queued.id).name} 예약됨${['kick','sweep'].includes(warrior.queued.id)?' · 발동 전 시점으로 방향 선택':''}`
-    : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '현재 위치에서 도끼를 끌어오기' : elapsed < .74 ? '도끼를 잡아 몸을 틀기' : '앞으로 파고들며 크게 가로베기', slash: '기본 공격 중', spin: a.stage===2 ? `끌어당기는 중 · 연속 ${a.streak}/3 · 다음 치명타까지 ${3-a.streak}회` : `연속 ${a.streak}/3 적중 → 흡입 강화 · WASD 이동` }[a.id]
+    : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '현재 위치에서 도끼를 끌어오기' : elapsed < .90 ? '낮게 버티고 크게 몸 틀기' : '온몸으로 휘두르는 넓은 가로베기', slash: a.automatic ? '근접 자동 공격 · 기술 입력이 우선해요' : '기본 공격 중', spin: a.stage===2 ? `끌어당기는 중 · 연속 ${a.streak}/3 · 다음 치명타까지 ${3-a.streak}회` : `연속 ${a.streak}/3 적중 → 흡입 강화 · WASD 이동` }[a.id]
     : warrior.planted ? `${warrior.planted.kicked ? '4 가로베기' : '3 날아차기 → 4 가로베기'} · 시점으로 방향 선택 · ${warrior.planted.remaining.toFixed(1)}초`
     : '1 돌진 → 2 내려찍기 → 3 날아차기 → 4 가로베기';
   $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / 3.4 * 100 : 0}%`;
@@ -396,6 +398,9 @@ function updateHUD() {
   $('health-fill').style.width = `${hp}%`; $('health-meter').setAttribute('aria-valuenow', String(hp));
   $('health-fill').style.background = hp < 30 ? '#ed9984' : '#b3dc94';
   $('rabbit-count').textContent = hunting.kills.rabbit; $('slime-count').textContent = hunting.kills.slime;
+  const automatic=!!(hunting.autoAttackRecovery || hunting.autoMelee.targetId),melee=hunting.weapon!=='bow';
+  $('auto-attack-status').textContent=!melee?'활 · 직접 조준해 발사':paused?'근접 자동 공격 · 대기':warrior.planted||(warrior.active&&warrior.active.id!=='slash')||warrior.combo.remaining>0?'자동 공격 · 기술 연계 대기':automatic?'근접 자동 공격 중':'근접 자동 공격 · 적 접근 시';
+  $('auto-attack-status').classList.toggle('attacking',melee&&automatic&&!paused);
   $('wood-count').textContent=forestry.wood;
   $('handle-state').textContent=`벌목 +${Math.round(forestry.bonus*100)}% · ${forestry.level}/3`;
   $('upgrade-handle').disabled=!started||hunting.hp<=0||forestry.cost===null||forestry.wood<forestry.cost;
@@ -420,8 +425,8 @@ function handleCombatEvents() {
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .8, event.z), life: 1 });
     } else if (event.type === 'warrior-impact') {
       warriorView.effect(event); huntingView.particleBurst({ ...event, y: event.y + .2, kind: 'impact' });
-      impactPause = Math.max(impactPause,event.skill==='slam'?.075:event.skill==='kick'?(event.kickPower==='strong'?.10:.055):event.skill==='sweep'?.065:0);
-      if (!reduceMotion) cameraShake = event.skill === 'slam' ? .13 : event.skill==='kick' ? event.kickPower==='strong'?.15:.09 : event.skill==='sweep'?.10:.032;
+      impactPause = Math.max(impactPause,event.skill==='slam'?.075:event.skill==='kick'?(event.kickPower==='strong'?.10:.055):event.skill==='sweep'?.095:0);
+      if (!reduceMotion) cameraShake = event.skill === 'slam' ? .13 : event.skill==='kick' ? event.kickPower==='strong'?.15:.09 : event.skill==='sweep'?.18:.032;
     } else if (event.type === 'ultimate-ready') notify('4연계 성공! 5번 회전베기를 사용할 수 있어요.');
     else if (event.type === 'spin-stage') { notify('회전베기 2단계 · 주변 적을 끌어당겨요!'); if(!reduceMotion) cameraShake=.07; }
     else if (event.type === 'spin-pulse' && event.extension>0) {
@@ -472,7 +477,7 @@ function frame(milliseconds) {
     const held = Math.min(impactPause,dt); impactPause -= held;
     accumulator += dt - held;
     while (accumulator >= 1 / 120) {
-      updateInput(1 / 120); player.update(1 / 120, input); hunting.update(1 / 120, player); accumulator -= 1 / 120;
+      updateInput(1 / 120); player.update(1 / 120, input); hunting.update(1 / 120, player); hunting.autoAttack(player); accumulator -= 1 / 120;
       if (hunting.hp <= 0) break;
     }
   }
@@ -507,14 +512,15 @@ if (modelContext?.registerTool) {
     bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
     warrior: warrior.state(),
     forestry: forestry.state(player),
-    combat: { criticalHits: hunting.criticalHits, lastHit: hunting.lastHit ? { ...hunting.lastHit } : null },
+    combat: { criticalHits: hunting.criticalHits, lastHit: hunting.lastHit ? { ...hunting.lastHit } : null,
+      autoMelee: { enabled:hunting.weapon!=='bow',...hunting.autoMelee,attacking:!!(hunting.autoAttackRecovery&&(warrior.active?.id==='slash'||hunting.swing>0)) } },
     creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,offBalanceSeconds:+e.offBalance.toFixed(2),knockback:e.knockback?{power:e.knockback.id,progress:+(e.knockback.elapsed/e.knockback.duration).toFixed(2)}:null,lastPush:e.lastPush?{...e.lastPush,travelled:+e.lastPush.travelled.toFixed(2)}:null,position:{x:+e.x.toFixed(2),y:+(e.y+e.hop).toFixed(2),z:+e.z.toFixed(2)}})),
   });
   const validateEmpty = value => {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
   };
   const tools = [
-    { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read player, combat, warrior and forestry state: wood inventory, handle upgrade, nearby trees with health, cracks and regrowth, and dropped wood. Includes combo progress, ultimate readiness, spin statistics and creatures.',
+    { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read player, combat, warrior and forestry state: wood inventory, handle upgrade, nearby trees with health, cracks and regrowth, and dropped wood. Includes combo progress, ultimate readiness, spin statistics, creatures and autoMelee attack count. While playing, axe and sword automatically attack the nearest living creature within their normal melee reach and unobstructed height. Auto swings preserve movement and give way to skill inputs; auto attack waits during skills, planted-axe follow-ups and unfinished combo windows. Trees do not initiate auto attacks; bows remain manual.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
       execute(input) { validateEmpty(input); return state(); } },

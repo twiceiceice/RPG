@@ -32,6 +32,8 @@ export class Hunting {
     this.drawing=false;this.charge=0;this.release=0;this.lastCharge=0;
     this.hurt=0;this.sinceHit=100;this.kills={rabbit:0,slime:0};this.time=0;this.nextArrow=1;
     this.criticalHits=0;this.lastHit=null;
+    this.autoAttackRecovery=false;this.meleeFacing=null;
+    this.autoMelee={targetId:null,attacks:0};
     this.warrior=new Warrior(this);
     this.forestry=new Forestry(this,trees);
     const rabbits=[[-3,2],[4,-2],[-5,-10],[10,-11],[-13,5],[12,10]];
@@ -46,11 +48,12 @@ export class Hunting {
   equip(weapon) {
     if(!['axe','sword','bow'].includes(weapon))throw new Error('Unknown weapon');
     if(weapon!==this.weapon)this.warrior.cancel();
-    this.cancelDraw();this.weapon=weapon;this.swing=0;this.release=0;
+    this.cancelDraw();this.weapon=weapon;this.swing=0;this.release=0;this.autoMelee.targetId=null;this.meleeFacing=null;
   }
   restorePlayer() {
     this.cancelDraw();this.warrior.cancel(true);this.hp=100;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
     this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.knockback=null;e.lastPush=null;e.hop=0;e.knockX=e.knockZ=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
+    this.autoAttackRecovery=false;this.meleeFacing=null;this.autoMelee={targetId:null,attacks:0};
     for(const tree of this.forestry.trees){tree.offBalance=0;tree.flash=0;}
   }
   targets() { return this.entities.concat(this.forestry.trees); }
@@ -98,11 +101,16 @@ export class Hunting {
     this.events.push({type:'shoot',charge});return true;
   }
   attack(player,direction) {
-    if(this.weapon==='axe')return this.warrior.basicAttack(player,direction);
+    if(this.weapon==='axe') {
+      const attacked=this.warrior.basicAttack(player,direction);
+      if(attacked)this.autoAttackRecovery=false;
+      return attacked;
+    }
     if(this.weapon!=='sword'||this.hp<=0||this.cooldown>0)return false;
     const length=Math.hypot(direction.x,direction.z)||1;
     const dx=direction.x/length,dz=direction.z/length;
     if(this.weapon==='sword') {
+      this.autoAttackRecovery=false;this.meleeFacing={x:dx,z:dz};
       this.cooldown=.43;this.swing=.34;
       this.events.push({type:'swing',x:player.x,y:player.y+.9,z:player.z,dx,dz});
       for(const e of this.targets()) {
@@ -114,6 +122,38 @@ export class Hunting {
         if(!this.unobstructed({x:player.x,y:player.y+1,z:player.z},{x:e.x,y:centerY,z:e.z},e.collider))continue;
         this.damageEntity(e,32,dx,dz,{weapon:'sword'});
       }
+    }
+    return true;
+  }
+  autoAttack(player) {
+    this.autoMelee.targetId=null;
+    const w=this.warrior;
+    if(this.hp<=0 || !player.grounded || !['axe','sword'].includes(this.weapon)
+      || w.active || w.planted || w.queued || (w.combo.step>0 && w.combo.remaining>0))return false;
+    const range=this.weapon==='axe'?2.7:2.6;
+    let target=null,nearest=Infinity;
+    // Only creatures initiate auto attack; passing a tree never starts logging.
+    for(const e of this.entities) {
+      if(!e.alive)continue;
+      const distance=Math.hypot(e.x-player.x,e.z-player.z);
+      const centerY=e.y+e.hop+e.height*.5;
+      const inHeight=this.weapon==='axe'?Math.abs(e.y+e.hop-player.y)<=1.7:Math.abs(centerY-player.y-1)<=1.45;
+      if(distance>range+e.radius || !inHeight || distance>=nearest)continue;
+      const originY=player.y+(this.weapon==='axe'?.9:1),targetY=this.weapon==='axe'?e.y+e.hop+.6:centerY;
+      if(!this.unobstructed({x:player.x,y:originY,z:player.z},{x:e.x,y:targetY,z:e.z}))continue;
+      target=e;nearest=distance;
+    }
+    if(!target)return false;
+    this.autoMelee.targetId=target.id;
+    if(this.cooldown>0)return false;
+    const direction=nearest>1e-6?{x:(target.x-player.x)/nearest,z:(target.z-player.z)/nearest}:w.aimDirection??{x:0,z:1};
+    const motion={vx:player.vx,vz:player.vz,jumpBuffer:player.jumpBuffer};
+    if(!this.attack(player,direction))return false;
+    this.autoAttackRecovery=true;this.autoMelee.attacks++;
+    if(w.active?.id==='slash') {
+      w.active.automatic=true;
+      // Automatic melee should not stop walking or consume a pending jump.
+      Object.assign(player,motion);
     }
     return true;
   }
@@ -136,6 +176,7 @@ export class Hunting {
   }
   update(dt,player) {
     this.time+=dt;this.cooldown=Math.max(0,this.cooldown-dt);this.swing=Math.max(0,this.swing-dt);this.release=Math.max(0,this.release-dt);
+    if(this.cooldown===0)this.autoAttackRecovery=false;
     if(this.drawing)this.charge=Math.min(1,this.charge+dt/1.05);
     this.invincible=Math.max(0,this.invincible-dt);this.hurt=Math.max(0,this.hurt-dt);this.sinceHit+=dt;
     for(const e of this.entities)e.offBalance=Math.max(0,e.offBalance-dt);
