@@ -88,3 +88,8 @@ body[data-weapon=axe]:has(#critical-opening:not([hidden])) #toast{bottom:320px}
 @media(max-width:900px){#raid-hud{right:20px;top:121px;width:220px;padding:12px}.raid-heading{font-size:12px}}
 @media(max-width:600px){.top{flex-wrap:wrap;gap:12px}.identity p{display:none}.actions{gap:4px}.actions button{padding:0 8px;font-size:12px;gap:5px}.actions .icon-button{width:31px}.actions kbd{display:none}#raid-hud{right:14px;top:153px;width:168px;padding:10px}.raid-heading{font-size:11px}.raid-heading strong{display:none}.raid-ally{gap:4px;font-size:10px}.raid-ally>span{width:75px}#raid-objective{font-size:10px;margin-bottom:8px}#beacon-status{gap:5px;font-size:10px}#raid-allies{max-height:142px;overflow:auto}#battle-dialog{padding:19px}.battle-options{grid-template-columns:1fr;gap:10px}.battle-options article{padding:14px}.battle-emblem{float:right}.battle-options h3{margin-top:3px}.battle-options p{margin-bottom:10px}.battle-options strong{margin-bottom:10px}.battle-intro{font-size:12px}.battle-rules{gap:8px;font-size:11px}}
 @media(max-height:600px) and (min-width:601px){#raid-hud{top:95px;width:218px;padding:10px}#raid-allies{max-height:120px;overflow:auto}.raid-ally{margin:5px 0}#raid-objective{margin:6px 0}.battle-options article{padding:14px}.battle-options h3{margin-top:8px}}
+#loading[role=alert]{width:min(430px,90vw);text-align:left;line-height:1.7}
+#loading[role=alert] strong{font-size:19px}#loading[role=alert] p{font-size:13px;color:#d4dfcd;margin:10px 0 18px}
+#loading[role=alert] .primary{justify-content:center;font-size:14px}
+#loading[role=alert] details{font-size:12px;color:#c9d7bf;margin-top:15px}#loading[role=alert] summary{cursor:pointer}
+#loading[role=alert] pre{white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 monospace}
