@@ -63,12 +63,12 @@ export class Hunting {
   damageEntity(e,damage,dx,dz,context={}) {
     if(e.kind==='tree')return this.forestry.damage(e,damage,dx,dz,context);
     if(!e.alive||damage<=0)return;
-    const critical=e.offBalance>0||context.forceCritical===true;
+    const critical=(!context.preserveOpening&&e.offBalance>0)||context.forceCritical===true;
     if(critical){damage*=2;e.offBalance=0;this.criticalHits++;}
     e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=dx*4;e.knockZ=dz*4;
     this.lastHit={targetId:e.id,damage,critical,time:this.time,...context};
     this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height+e.hop,z:e.z,damage,critical,kind:e.kind,...context});
-    if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});this.village?.rewardKill(e);}
+    if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;if(e.kind in this.kills)this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});this.village?.rewardKill(e);}
     return { damage, critical, killed: !e.alive };
   }
   applyOffBalance(e,seconds) {
@@ -172,7 +172,7 @@ export class Hunting {
     if(e.kind==='tree')return;
     for(const [axis,amount] of [['x',dx],['z',dz]]) {
       const old=e[axis];e[axis]+=amount;
-      if(this.village?.isSafe(e,e.radius)||this.colliders.some(b=>b.active!==false&&e.y<b.top-.08&&e.y+e.height>b.bottom&&overlaps(e.x,e.z,b,e.radius))){e[axis]=old;e.heading+=.9;}
+      if((!e.raider&&this.village?.contains(e,e.radius))||this.colliders.some(b=>b.active!==false&&e.y<b.top-.08&&e.y+e.height>b.bottom&&overlaps(e.x,e.z,b,e.radius))){e[axis]=old;e.heading+=.9;}
     }
     const d=Math.hypot(e.x,e.z);
     if(d>WORLD_RADIUS-3){e.x*=((WORLD_RADIUS-3)/d);e.z*=((WORLD_RADIUS-3)/d);e.heading+=Math.PI*.8;}
@@ -199,6 +199,7 @@ export class Hunting {
     for(const e of this.entities) {
       e.flash=Math.max(0,e.flash-dt);e.recovery=Math.max(0,e.recovery-dt);
       if(!e.alive){
+        if(e.raider)continue;
         e.respawn-=dt;
         if(e.respawn<=0&&Math.hypot(e.homeX-player.x,e.homeZ-player.z)>(e.kind==='slime'?9:4)) {
           Object.assign(e,{x:e.homeX,z:e.homeZ,y:terrainHeight(e.homeX,e.homeZ),hp:e.maxHp,alive:true,windup:0,recovery:1,knockX:0,knockZ:0,knockback:null,lastPush:null,hop:0,stagger:0,offBalance:0});
@@ -220,6 +221,7 @@ export class Hunting {
         continue;
       }
       if(e.stagger>0){e.stagger=Math.max(0,e.stagger-dt);e.hop=0;e.moving=false;this.moveEntity(e,e.knockX*dt,e.knockZ*dt);e.knockX*=Math.exp(-12*dt);e.knockZ*=Math.exp(-12*dt);continue;}
+      if(e.raider){this.moveEntity(e,e.knockX*dt,e.knockZ*dt);e.knockX*=Math.exp(-12*dt);e.knockZ*=Math.exp(-12*dt);continue;}
       const px=player.x-e.x,pz=player.z-e.z,distance=Math.hypot(px,pz),homeDistance=Math.hypot(e.homeX-e.x,e.homeZ-e.z);
       let speed=0;e.phase+=dt*(e.kind==='rabbit'?10:6);e.brain-=dt;
       if(e.kind==='rabbit') {

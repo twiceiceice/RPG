@@ -9,12 +9,14 @@ export class Village {
     this.combat=combat;combat.village=this;this.storage=storage;this.storageAvailable=!!storage;
     this.gold=20;this.potions=1;this.armorLevel=0;this.potionCooldown=0;this.time=0;this.saveClock=0;this.lastSaved='';
     this.blocks={timber:0,stone:0,roof:0};
+    this.raidWins={defense:0,assault:0};
     this.residents=RESIDENTS.map(n=>({...n,y:terrainHeight(n.x,n.z),step:0,moving:false,wait:1,routeIndex:0}));
     this.load();combat.armorLevel=this.armorLevel;
     for(const e of combat.entities)if(this.isSafe(e)){e.x=e.homeX=6;e.z=e.homeZ=18;e.y=terrainHeight(e.x,e.z);}
     this.save();
   }
-  isSafe(position,margin=0) { return inVillage(position.x,position.z,margin); }
+  contains(position,margin=0) { return inVillage(position.x,position.z,margin); }
+  isSafe(position,margin=0) { return this.contains(position,margin)&&!(this.raids?.active&&this.raids.mode==='defense'); }
   load() {
     try {
       const raw=this.storage?.getItem(SAVE_KEY);if(!raw)return;
@@ -22,10 +24,11 @@ export class Village {
       this.gold=integer(data.gold,20,999999);this.potions=integer(data.potions,1,99);this.armorLevel=integer(data.armorLevel,0,3);
       this.combat.forestry.wood=integer(data.wood,0,99999);this.combat.forestry.level=integer(data.handleLevel,0,3);
       for(const key of Object.keys(this.blocks))this.blocks[key]=integer(data.blocks?.[key],0,99999);
+      for(const key of Object.keys(this.raidWins))this.raidWins[key]=integer(data.raidWins?.[key],0,99999);
     } catch { this.storageAvailable=false; }
   }
   save() {
-    const payload=JSON.stringify({version:1,gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,wood:this.combat.forestry.wood,handleLevel:this.combat.forestry.level,blocks:this.blocks});
+    const payload=JSON.stringify({version:1,gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,wood:this.combat.forestry.wood,handleLevel:this.combat.forestry.level,blocks:this.blocks,raidWins:this.raidWins});
     if(payload===this.lastSaved)return;
     try {if(this.storage){this.storage.setItem(SAVE_KEY,payload);this.storageAvailable=true;}this.lastSaved=payload;}
     catch {this.storageAvailable=false;}
@@ -33,6 +36,7 @@ export class Village {
   nearest(player) {
     let nearest=null,distance=VILLAGE.interactionRange;
     for(const n of this.residents) {
+      if(n.battle)continue;
       const d=Math.hypot(n.x-player.x,n.z-player.z);
       if(d>distance||Math.abs(n.y-player.y)>1.5||!this.combat.unobstructed({x:player.x,y:player.y+1.2,z:player.z},{x:n.x,y:n.y+1.2,z:n.z}))continue;
       nearest=n;distance=d;
@@ -42,6 +46,7 @@ export class Village {
   interactionReason(npcId,player) {
     const n=this.residents.find(n=>n.id===npcId);
     if(!n)return '주민을 찾을 수 없어요.';
+    if(this.raids?.active)return '전투가 끝나면 주민과 거래할 수 있어요.';
     if(this.combat.hp<=0)return '먼저 다시 일어나 주세요.';
     if(this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 말을 걸어 주세요.';
     if(Math.hypot(n.x-player.x,n.z-player.z)>VILLAGE.interactionRange||Math.abs(n.y-player.y)>1.5)return '주민에게 조금 더 가까이 가세요.';
@@ -100,6 +105,7 @@ export class Village {
     this.combat.events.push({type:'gold-earned',amount,x:entity.x,y:entity.y+2,z:entity.z});
   }
   travelReason(player) {
+    if(this.raids?.active)return '전투 중에는 이동할 수 없어요. 전투 메뉴에서 철수할 수 있어요.';
     if(this.combat.hp<=0)return '먼저 다시 일어나 주세요.';
     if(this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 이동해 주세요.';
     if(this.combat.sinceHit<6||this.combat.entities.some(e=>e.alive&&e.kind==='slime'&&Math.hypot(e.x-player.x,e.z-player.z)<8))return '적에게서 벗어난 뒤 마을로 이동할 수 있어요.';
@@ -109,6 +115,7 @@ export class Village {
     this.time+=dt;this.potionCooldown=Math.max(0,this.potionCooldown-dt);this.saveClock+=dt;
     if(this.saveClock>1){this.saveClock=0;this.save();}
     for(const n of this.residents) {
+      if(n.battle)continue;
       n.moving=false;
       if(Math.hypot(n.x-player.x,n.z-player.z)<3.4){n.heading=Math.atan2(player.x-n.x,player.z-n.z);continue;}
       if(!n.route)continue;

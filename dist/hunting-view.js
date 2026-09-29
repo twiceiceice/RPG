@@ -136,7 +136,7 @@ export class HuntingView{
   }
   update(dt,firstPerson,avatar,paused){
     for(const e of this.hunting.entities){
-      const v=this.creatures.get(e.id);v.root.visible=e.alive;v.proxy.visible=e.alive;
+      const v=this.creatures.get(e.id);if(!v)continue;v.root.visible=e.alive;v.proxy.visible=e.alive;
       v.root.position.set(e.x,e.y,e.z);v.root.rotation.y=e.heading;v.g.position.y=e.hop;v.proxy.position.y=e.height*.5+e.hop;
       const vulnerable=e.offBalance>0,wobble=vulnerable?Math.min(1,e.offBalance/.3)*(e.stagger>0?.23:.12):0;
       v.g.rotation.z=Math.sin(this.hunting.time*12+e.variant)*wobble;v.g.rotation.x=Math.cos(this.hunting.time*9)*wobble*.4;

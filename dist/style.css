@@ -58,3 +58,33 @@ body[data-weapon=axe]:has(#critical-opening:not([hidden])) #toast{bottom:320px}
 .block-wallet{border-top:1px solid #d6b47833;margin-top:10px;padding-top:8px;line-height:1.7}.block-wallet>span{display:block;font-size:11px;color:#afc3ab}.block-wallet strong{display:block;font-size:11px;font-weight:500;white-space:nowrap;color:#eee0bd}#trade-blocks{margin-top:9px;color:#d3debc;font-size:12px}#trade-tabs{display:flex;gap:6px;margin-top:18px}#trade-tabs button{flex:1;padding:10px;border:1px solid #c9daab33;border-radius:8px;background:#ffffff08;color:#bdcdb9;font-size:13px}#trade-tabs button[aria-pressed=true]{background:#d6bb7530;border-color:#d6bb75;color:#ffe3a5}#block-storage-note{margin-top:10px;color:#bfcdb2;font-size:12px;line-height:1.6}.offer-icon.stone{color:#d0dddb;background:#72877a66}.offer-icon.roof{color:#f7c193;background:#ad654640}
 .building-shop #resident-portrait{height:54px;width:54px;font-size:28px}.building-shop .resident-heading h2{font-size:23px}.building-shop #resident-hello{font-size:13px;line-height:1.65;margin:12px 0}.building-shop #trade-inventory{padding:8px 0}.building-shop #trade-blocks{margin-top:6px}.building-shop #trade-tabs{margin-top:12px}.building-shop #trade-tabs button{padding:8px}.building-shop #trade-offers{margin-top:12px;gap:8px}.building-shop .trade-offer{padding:10px 12px}.building-shop #trade-message{min-height:26px;margin-top:10px}.building-shop .trade-footer{padding-top:8px}#trade-dialog{scrollbar-width:thin;scrollbar-color:#82997e #203a30}
 @media(max-width:960px){#village-status{top:350px}}@media(max-width:560px){#village-status{top:289px}.block-wallet{margin-top:7px;padding-top:6px}.block-wallet strong{font-size:10px}#target-info{top:328px}#trade-dialog{max-height:88vh}#trade-tabs{margin-top:13px}#trade-offers{margin-top:13px}}@media(max-height:620px) and (min-width:561px){#village-status{top:278px}}
+/* Battle controls stay beside the playfield; inventory gives way during raids. */
+#battle-dialog{max-width:660px;width:calc(100% - 36px);padding:26px;overflow-y:auto}
+#battle-dialog .eyebrow{letter-spacing:1.5px;display:block;margin-bottom:9px}
+.battle-intro{margin:14px 0 18px;line-height:1.6}
+.battle-options{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.battle-options article{padding:19px;border:1px solid #cedbad2c;background:#ffffff05;border-radius:13px}
+.battle-emblem{display:grid;place-items:center;width:43px;height:43px;color:#bddcc0;background:#8bb7a21e;border:1px solid #9bc6b42a;border-radius:11px;font-size:27px}
+.battle-emblem.attack{color:#e9b497;background:#d3916b17;border-color:#c999812e}
+.battle-options h3{font-size:19px;letter-spacing:-.4px;font-weight:500;margin:15px 0 6px}
+.battle-options p{line-height:1.7;font-size:13px;margin:0 0 16px}
+.battle-options strong{font-weight:400;color:#decba0;font-size:12px;display:block;margin-bottom:18px}
+.battle-options button{width:100%;border-radius:8px;padding:12px 8px;background:#c4dc9c;color:#22382e;font-size:14px;font-weight:600}
+.battle-options article:nth-child(2) button{background:#dec09c}
+.battle-options button:disabled{opacity:.35;cursor:not-allowed}
+#battle-reason{font-size:12px;color:#d9cfaa;min-height:23px;margin-top:13px}
+.battle-rules{display:flex;gap:8px 16px;flex-wrap:wrap;font-size:12px;color:#d0ddcf;margin-top:9px}
+.battle-footnote{font-size:11px!important;line-height:1.7!important;opacity:.8}
+#battle-result{padding:13px 15px;margin:14px 0;background:#a9ce851b;border:1px solid #b7d79344;border-radius:9px;color:#e2edbe;font-size:14px;line-height:1.6}
+#retreat-button{width:100%;padding:11px;margin-top:15px;border:1px solid #d29c7555;color:#e2b497;border-radius:8px;background:#d9947210;font-size:13px}
+#raid-hud{position:fixed;right:32px;top:120px;width:249px;padding:15px;background:#17352ee8;border:1px solid #e2cc982e;border-radius:13px;z-index:2;backdrop-filter:blur(12px)}
+.raid-heading{display:flex;justify-content:space-between;gap:8px;font-size:13px;color:#ebd5a4}.raid-heading strong{font-size:11px;font-weight:500;color:#c0d2ba}
+#raid-objective{font-size:12px;color:#d2dfc8;line-height:1.6;margin:9px 0 12px}
+#beacon-status{display:flex;align-items:center;gap:8px;font-size:11px;margin-bottom:12px;color:#e9d294}
+#beacon-status progress{width:100%;height:6px;accent-color:#dfbd6b}#beacon-status span{white-space:nowrap}#beacon-status b{font-weight:400;min-width:24px}
+.raid-ally{display:flex;align-items:center;gap:8px;margin:7px 0;font-size:11px;color:#d3e0d4}.raid-ally>span{width:85px;white-space:nowrap}.raid-ally progress{flex:1;min-width:0;height:5px;accent-color:#a6d6b1}.raid-ally small{font-size:10px;min-width:28px;text-align:right;font-variant-numeric:tabular-nums}.raid-ally.down{opacity:.45}
+#rally-button{margin-top:10px;width:100%;border:1px solid #c4d9aa39;border-radius:7px;padding:8px;background:#c8ddbd0d;color:#e1edce;font-size:12px}#rally-button[aria-pressed=true]{background:#adc78429;border-color:#cbdb98}
+.raid-active #lumber-hud{display:none}.ally-heal{color:#b8fac2!important;font-size:16px!important}.ally-damage{color:#eeb4a4!important;font-size:13px!important}
+@media(max-width:900px){#raid-hud{right:20px;top:121px;width:220px;padding:12px}.raid-heading{font-size:12px}}
+@media(max-width:600px){.top{flex-wrap:wrap;gap:12px}.identity p{display:none}.actions{gap:4px}.actions button{padding:0 8px;font-size:12px;gap:5px}.actions .icon-button{width:31px}.actions kbd{display:none}#raid-hud{right:14px;top:153px;width:168px;padding:10px}.raid-heading{font-size:11px}.raid-heading strong{display:none}.raid-ally{gap:4px;font-size:10px}.raid-ally>span{width:75px}#raid-objective{font-size:10px;margin-bottom:8px}#beacon-status{gap:5px;font-size:10px}#raid-allies{max-height:142px;overflow:auto}#battle-dialog{padding:19px}.battle-options{grid-template-columns:1fr;gap:10px}.battle-options article{padding:14px}.battle-emblem{float:right}.battle-options h3{margin-top:3px}.battle-options p{margin-bottom:10px}.battle-options strong{margin-bottom:10px}.battle-intro{font-size:12px}.battle-rules{gap:8px;font-size:11px}}
+@media(max-height:600px) and (min-width:601px){#raid-hud{top:95px;width:218px;padding:10px}#raid-allies{max-height:120px;overflow:auto}.raid-ally{margin:5px 0}#raid-objective{margin:6px 0}.battle-options article{padding:14px}.battle-options h3{margin-top:8px}}

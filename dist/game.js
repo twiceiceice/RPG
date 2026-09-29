@@ -9,6 +9,8 @@ import { ForestryView } from './forestry-view.js';
 import { Village } from './village.js';
 import { VILLAGE, BUILDING_BLOCKS } from './village-data.js';
 import { createVillageScenery, VillageView } from './village-view.js';
+import { Raids } from './raids.js';
+import { createRaidScenery, RaidView } from './raid-view.js';
 
 const $ = id => document.getElementById(id);
 const world = $('world'), loading = $('loading');
@@ -30,6 +32,7 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(57, innerWidth / innerHeight, .08, 220);
 const environment = createEnvironment(scene);
 createVillageScenery(scene,environment);
+const raidScenery=createRaidScenery(scene,environment);
 const avatar = createAvatar(scene);
 const player = new Movement(environment.colliders);
 const hunting = new Hunting(environment.colliders, environment.trees);
@@ -39,6 +42,8 @@ const village=new Village(hunting,localSave);
 const villageView=new VillageView(scene,camera,village);
 const forestryView = new ForestryView(scene,camera,forestry,environment.trees);
 const huntingView = new HuntingView(scene, camera, avatar, hunting, environment);
+const raids=new Raids(hunting,village);
+const raidView=new RaidView(scene,camera,raids,villageView,huntingView,raidScenery);
 const warrior = hunting.warrior;
 const warriorView = new WarriorView(scene, camera, avatar, warrior);
 const coarsePointer = matchMedia('(pointer:coarse)').matches;
@@ -68,7 +73,7 @@ function capturePointer(element, pointerId) {
 }
 function setPaused(value) {
   paused = value; clearInput(); accumulator = 0;
-  $('resume').hidden = !value || !started || $('help-dialog').open || $('trade-dialog').open || hunting.hp <= 0;
+  $('resume').hidden = !value || !started || $('help-dialog').open || $('trade-dialog').open || $('battle-dialog').open || hunting.hp <= 0;
   if (value && document.pointerLockElement) document.exitPointerLock();
 }
 async function lockMouse() {
@@ -94,6 +99,7 @@ function setView(mode) {
   updateCamera(1, true);
 }
 function resetPosition() {
+  raids.abort();if($('battle-dialog').open)$('battle-dialog').close();
   if($('trade-dialog').open)$('trade-dialog').close();
   const reviving = hunting.hp <= 0;
   player.reset(); yaw = .16; pitch = .29; clearInput();
@@ -143,7 +149,7 @@ function upgradeHandle() {
   village.save();updateHUD();if(talkingTo)renderTrade();return result;
 }
 function travelToVillage() {
-  const reason=$('trade-dialog').open||$('help-dialog').open?'대화나 도움말을 먼저 닫아 주세요.':village.travelReason(player);
+  const reason=$('trade-dialog').open||$('help-dialog').open||$('battle-dialog').open?'열린 메뉴를 먼저 닫아 주세요.':village.travelReason(player);
   if(reason){notify(reason);return {accepted:false,reason};}
   Object.assign(player,{x:VILLAGE.entry.x,z:VILLAGE.entry.z,y:terrainHeight(VILLAGE.entry.x,VILLAGE.entry.z),vx:0,vz:0,vy:0,grounded:true,jumpBuffer:0});
   hunting.inSanctuary=true;hunting.autoMelee.targetId=null;hunting.swing=0;impactPause=0;
@@ -155,6 +161,37 @@ function travelToVillage() {
 function usePotion() {
   const result=!started||paused?{accepted:false,reason:'플레이를 이어 간 뒤 물약을 사용해 주세요.'}:village.usePotion();
   notify(result.message??result.reason);updateHUD();return result;
+}
+function renderBattle(){
+  for(const mode of ['defense','assault'])$('start-'+mode).disabled=!!raids.startReason(mode,player);
+  const r=raids.result;$('battle-result').hidden=!r;
+  if(r)$('battle-result').textContent=r.won?`${r.mode==='defense'?'방어 성공':'야영지 정리 완료'} · +${r.reward.gold} 골드 · ${r.mode==='defense'?'나무 10 · 돌 5':'돌 10 · 지붕 5'} 블록`:`전투 종료 · ${r.reason} 주민들은 모두 회복했어요.`;
+  $('battle-reason').textContent=raids.active?'전투 진행 중 · 메뉴를 닫으면 계속됩니다.':raids.startReason('defense',player)??`준비 완료 · 방어 ${village.raidWins.defense}승 / 출정 ${village.raidWins.assault}승 · 시작하면 8초간 준비해요.`;
+  $('retreat-button').hidden=!raids.active;
+}
+function openBattle(){
+  if($('help-dialog').open||$('trade-dialog').open)return {accepted:false,reason:'열린 메뉴를 먼저 닫아 주세요.'};
+  renderBattle();if(!$('battle-dialog').open)$('battle-dialog').showModal();setPaused(true);return {accepted:true};
+}
+function startBattle(mode){
+  if(!$('battle-dialog').open)return {accepted:false,reason:'J 전투 메뉴를 먼저 열어 주세요.'};
+  const result=raids.start(mode,player);if(!result.accepted){notify(result.reason);renderBattle();return result;}
+  started=true;$('welcome').hidden=true;$('crosshair').hidden=false;$('battle-dialog').close();setPaused(false);
+  yaw=Math.PI/2;pitch=.34;cameraDistance=10;avatar.root.rotation.y=-Math.PI/2;impactPause=0;
+  updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});return result;
+}
+function rallyResidents(){
+  const result=!started||paused?{accepted:false,reason:'플레이를 이어 가 주세요.'}:raids.toggleOrder();notify(result.message??result.reason);updateHUD();return result;
+}
+function updateRaidHUD(){
+  $('raid-hud').hidden=!raids.active;document.body.classList.toggle('raid-active',raids.active);
+  if(!raids.active)return;
+  const s=raids.state();$('raid-mode').textContent=s.mode==='defense'?'솔바람 마을 방어':'붉은발 야영지 공격';$('raid-wave').textContent=s.mode==='defense'?`${s.wave} / 2차`:'원정대';
+  $('raid-objective').textContent=s.phase==='preparing'?`전투 시작까지 ${Math.ceil(s.timer)}초 · 자리 잡기`:s.phase==='interval'?`다음 습격까지 ${Math.ceil(s.timer)}초`:`남은 적 ${s.remaining}명 · ${s.mode==='defense'?'수호 깃발을 지키세요':'대장과 부하를 처치하세요'}`;
+  $('beacon-status').hidden=s.mode!=='defense';$('beacon-health').value=s.beaconHp;$('beacon-value').textContent=s.beaconHp;
+  $('rally-button').textContent=s.order==='fight'?'G  내게 모이기':'G  다시 교전하기';$('rally-button').setAttribute('aria-pressed',String(s.order==='rally'));
+  const list=$('raid-allies');list.replaceChildren();
+  for(const a of s.allies){const row=document.createElement('div');row.className='raid-ally'+(a.alive?'':' down');const name=document.createElement('span');name.textContent=`${a.name} · ${a.role}`;const hp=document.createElement('progress');hp.max=a.maxHp;hp.value=a.health;hp.setAttribute('aria-label',`${a.name} 체력 ${a.health}/${a.maxHp}`);const status=document.createElement('small');status.textContent=a.alive?(a.retreating?'후퇴':`${a.health}`):'쓰러짐';row.append(name,hp,status);list.append(row);}
 }
 function renderTrade(message='') {
   const npc=village.residents.find(n=>n.id===talkingTo);if(!npc)return;
@@ -218,6 +255,12 @@ $('revive-button').addEventListener('click', () => { resetPosition(); play(); })
 $('play-button').addEventListener('click', play);
 $('village-button').addEventListener('click',travelToVillage);
 $('village-start').addEventListener('click',travelToVillage);
+$('battle-button').addEventListener('click',openBattle);
+$('close-battle').addEventListener('click',()=>$('battle-dialog').close());
+$('battle-dialog').addEventListener('close',()=>{setPaused(document.hidden||!document.hasFocus());updateHUD();world.focus({preventScroll:true});});
+for(const mode of ['defense','assault'])$('start-'+mode).addEventListener('click',()=>startBattle(mode));
+$('rally-button').addEventListener('click',()=>{rallyResidents();world.focus({preventScroll:true});});
+$('retreat-button').addEventListener('click',()=>{raids.abort();$('battle-dialog').close();hunting.sinceHit=100;hunting.warrior.cancel();travelToVillage();});
 $('potion-button').addEventListener('click',()=>{usePotion();world.focus({preventScroll:true});});
 $('interact-prompt').addEventListener('click',()=>openResident());
 $('close-trade').addEventListener('click',()=>$('trade-dialog').close());
@@ -240,7 +283,7 @@ document.addEventListener('pointerlockerror', () => {
   if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~4 연계 · 5 궁극기');
 });
 document.addEventListener('keydown', event => {
-  if ($('help-dialog').open || $('trade-dialog').open) return;
+  if ($('help-dialog').open || $('trade-dialog').open || $('battle-dialog').open) return;
   if (event.code === 'Escape') { if (started && !locked && hunting.hp > 0) setPaused(!paused); return; }
   if (event.code === 'Enter' && !started) { play(); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
@@ -252,8 +295,10 @@ document.addEventListener('keydown', event => {
   if (event.code === 'KeyC') equipWeapon('bow');
   if (event.code === 'KeyT') {event.preventDefault();upgradeHandle();return;}
   if (event.code === 'KeyB') {event.preventDefault();travelToVillage();return;}
+  if (event.code === 'KeyJ') {event.preventDefault();openBattle();return;}
   if (!started || paused) return;
   if(event.code==='KeyH'){event.preventDefault();usePotion();return;}
+  if(event.code==='KeyG'){event.preventDefault();rallyResidents();return;}
   if(event.code==='KeyE'&&village.nearest(player)){event.preventDefault();openResident();return;}
   const skill = WARRIOR_SKILLS.find(s => event.code === 'Digit' + s.key);
   if (skill) { event.preventDefault(); useWarriorSkill(skill.id); return; }
@@ -459,14 +504,15 @@ function updateWarriorHUD() {
   $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / 3.4 * 100 : 0}%`;
 }
 function updateHUD() {
+  updateRaidHUD();
   const safe=village.isSafe(player),near=village.nearest(player);
-  $('place-name').textContent=safe?VILLAGE.name:'시작의 들판';
+  $('place-name').textContent=raids.active?(raids.mode==='defense'?'솔바람 마을 · 교전 중':'붉은발 야영지'):safe?VILLAGE.name:'시작의 들판';
   $('gold-count').textContent=village.gold;
   $('potion-button').textContent=village.potionCooldown>0?`물약 ${village.potionCooldown.toFixed(1)}초`:`H 물약 ${village.potions}`;
   $('potion-button').disabled=!started||paused||hunting.hp<=0||hunting.hp>=100||village.potions<1||village.potionCooldown>0;
-  $('village-status').textContent=safe?'솔바람 마을 · 안전 지역':`솔바람 마을 ${Math.round(Math.hypot(player.x-VILLAGE.entry.x,player.z-VILLAGE.entry.z))}m · B 이동`;
+  $('village-status').textContent=raids.active?'J 전투 메뉴 · G 주민 지시':safe?'솔바람 마을 · J 방어와 출정':`솔바람 마을 ${Math.round(Math.hypot(player.x-VILLAGE.entry.x,player.z-VILLAGE.entry.z))}m · B 이동`;
   $('village-status').classList.toggle('safe',safe);
-  $('interact-prompt').hidden=!started||paused||!near||hunting.hp<=0;
+  $('interact-prompt').hidden=raids.active||!started||paused||!near||hunting.hp<=0;
   if(near)$('interact-label').textContent=`${near.name} · ${near.shop?'거래하기':'대화하기'}`;
   $('coordinates').textContent = `${player.x.toFixed(0)} / ${(-player.z).toFixed(0)}`;
   const speed = Math.hypot(player.vx, player.vz);
@@ -490,15 +536,19 @@ function updateHUD() {
   const target = hunting.targets().find(e => e.id === aim.entity && e.alive);
   $('target-info').hidden = !target || !started;
   $('crosshair').classList.toggle('on-target', !!target);
-  if (target) { $('target-name').textContent = target.kind==='tree'?(target.scale>=1.2?'굵은 소나무':'소나무'):target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]; $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; $('target-opening').textContent=target.kind==='tree'?'균열 · 다음 적중 2배':'비틀거림 · 다음 적중 2배'; }
+  if (target) { $('target-name').textContent = target.name??(target.kind==='tree'?(target.scale>=1.2?'굵은 소나무':'소나무'):target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]); $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; $('target-opening').textContent=target.kind==='tree'?'균열 · 다음 적중 2배':'비틀거림 · 다음 적중 2배'; }
   updateWarriorHUD();
   $('warrior-hud').hidden=safe||hunting.weapon!=='axe';
   if(safe){$('combo-title').textContent='솔바람 마을 · 안전 지역';$('combo-hint').textContent='주민 가까이 E 대화 · H 물약 · 서쪽 문으로 들판';for(const s of WARRIOR_SKILLS)$('skill-'+s.id).classList.add('unavailable');}
 }
 function handleCombatEvents() {
   for (const event of hunting.events.splice(0)) {
-    if (event.type === 'hit') {
-      hitFeedback = event.critical ? .3 : .18;
+    if(event.type==='raid-notice')notify(event.message);
+    else if(event.type==='raid-result'){notify(event.message);if(hunting.hp>0)openBattle();}
+    else if(event.type==='ally-heal'||event.type==='ally-hit'){
+      const el=document.createElement('span');el.className='damage-number '+(event.type==='ally-heal'?'ally-heal':'ally-damage');el.textContent=event.type==='ally-heal'?`+${event.amount}`:`−${event.damage}`;$('combat-fx').appendChild(el);floatingHits.push({el,position:new THREE.Vector3(event.x,event.y,event.z),life:.7});
+    }else if (event.type === 'hit') {
+      if(event.source!=='ally')hitFeedback = event.critical ? .3 : .18;
       const el = document.createElement('span'); el.className = event.critical ? 'damage-number critical' : event.kickPower ? `damage-number kick-${event.kickPower}` : 'damage-number'; el.textContent = event.critical ? `치명타 ${event.damage}` : event.kickPower ? `${event.powerName} · ${event.damage}` : event.damage; $('combat-fx').appendChild(el);
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .25, event.z), life: event.critical ? 1.15 : .85 });
       huntingView.particleBurst(event.critical ? { ...event, kind: 'impact' } : event);
@@ -563,11 +613,11 @@ function frame(milliseconds) {
     const held = Math.min(impactPause,dt); impactPause -= held;
     accumulator += dt - held;
     while (accumulator >= 1 / 120) {
-      updateInput(1 / 120); player.update(1 / 120, input); hunting.update(1 / 120, player); village.update(1 / 120,player); hunting.autoAttack(player); accumulator -= 1 / 120;
+      updateInput(1 / 120); player.update(1 / 120, input); hunting.update(1 / 120, player); raids.update(1 / 120,player); village.update(1 / 120,player); hunting.autoAttack(player); accumulator -= 1 / 120;
       if (hunting.hp <= 0) break;
     }
   }
-  animateAvatar(dt, time); forestryView.update(player);villageView.update(player);updateCamera(dt);
+  animateAvatar(dt, time); forestryView.update(player);villageView.update(player);updateCamera(dt);raidView.update();
   handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); warriorView.update(dt, firstPerson, player, paused); combatFeedback(dt);
   if (!paused) { cameraShake *= Math.exp(-18 * dt); camera.position.x += Math.sin(time * 61) * cameraShake; camera.position.y += Math.cos(time * 47) * cameraShake * .65; }
   environment.clouds.forEach((cloud, i) => { cloud.position.x += dt * (.15 + i * .01); if (cloud.position.x > 110) cloud.position.x = -110; });
@@ -599,6 +649,7 @@ if (modelContext?.registerTool) {
     warrior: warrior.state(),
     forestry: forestry.state(player),
     village:{...village.state(player),talkingTo},
+    raids:raids.state(),
     combat: { criticalHits: hunting.criticalHits, lastHit: hunting.lastHit ? { ...hunting.lastHit } : null,
       autoMelee: { enabled:hunting.weapon!=='bow',...hunting.autoMelee,intervalSeconds:hunting.meleeInterval,cooldown:+hunting.meleeCooldown.toFixed(3),attacking:!!(hunting.autoAttackRecovery&&(warrior.active?.id==='slash'||hunting.swing>0)) } },
     creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,offBalanceSeconds:+e.offBalance.toFixed(2),knockback:e.knockback?{power:e.knockback.id,progress:+(e.knockback.elapsed/e.knockback.duration).toFixed(2)}:null,lastPush:e.lastPush?{...e.lastPush,travelled:+e.lastPush.travelled.toFixed(2)}:null,position:{x:+e.x.toFixed(2),y:+(e.y+e.hop).toFixed(2),z:+e.z.toFixed(2)}})),
@@ -607,6 +658,9 @@ if (modelContext?.registerTool) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
   };
   const tools = [
+    {name:'open_battle_menu',title:'방어와 출정 메뉴',description:'Open the visible J battle menu and pause the game. Battles start in the village.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=openBattle();if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'start_village_battle',title:'방어 또는 출정 시작',description:'Use the open battle menu to start defense (two waves with seven residents) or assault (four volunteers against six camp enemies). Requires village proximity, living player and no active attack. Moves everyone to the visible battle staging position, then gives eight preparation seconds. Matches the two battle menu buttons.',inputSchema:{type:'object',properties:{mode:{type:'string',enum:['defense','assault']}},required:['mode'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||!['defense','assault'].includes(input.mode)||Object.keys(input).some(k=>k!=='mode'))throw new Error('Choose defense or assault.');const r=startBattle(input.mode);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'rally_residents',title:'주민 집결 또는 교전',description:'Toggle G between rallying near the player and fighting nearby enemies. Requires an active unpaused battle. Matches the visible resident command button.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=rallyResidents();if(!r.accepted)throw new Error(r.reason);return state();}},
     { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read player, combat, warrior and forestry state: wood inventory, handle upgrade, nearby trees with health, cracks and regrowth, and dropped wood. Includes combo progress, ultimate readiness, spin statistics, creatures and autoMelee attack count. While playing, axe and sword automatically attack the nearest living creature within their normal melee reach and unobstructed height. Auto swings preserve movement and give way to skill inputs; auto attack waits during skills, planted-axe follow-ups and unfinished combo windows. Trees do not initiate auto attacks; bows remain manual.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: true, untrustedContentHint: false },
