@@ -109,7 +109,7 @@ export class Village {
   travelReason(player) {
     if(this.raids?.active)return '전투 중에는 이동할 수 없어요. 전투 메뉴에서 철수할 수 있어요.';
     if(this.combat.hp<=0)return '먼저 다시 일어나 주세요.';
-    if(this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 이동해 주세요.';
+    if(this.combat.tactics?.busy||this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 이동해 주세요.';
     if(this.combat.sinceHit<6||this.combat.entities.some(e=>e.alive&&e.kind==='slime'&&Math.hypot(e.x-player.x,e.z-player.z)<8))return '적에게서 벗어난 뒤 마을로 이동할 수 있어요.';
     return null;
   }

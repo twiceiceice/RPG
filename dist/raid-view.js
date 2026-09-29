@@ -1,6 +1,7 @@
 import * as THREE from './vendor/three.module.js';
 import {terrainHeight} from './movement.js';
 import {CAMP,BEACON,ALLY_ROLES} from './raid-data.js';
+import {BATTLE,soldierRole} from './battle-rules.js';
 const mat=(color)=>new THREE.MeshStandardMaterial({color,roughness:.82});
 const wood=mat(0x664932),steel=mat(0xb8c4bf),dark=mat(0x353d36),red=mat(0xa04d42),gold=mat(0xd7ae62);
 function box(parent,m,x,y,z,w,h,d){const mesh=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),m);mesh.position.set(x,y,z);mesh.castShadow=true;mesh.receiveShadow=true;parent.add(mesh);return mesh;}
@@ -38,6 +39,7 @@ function weapon(style){
     box(root,gold,0,.37,.36,.06,.08,.32);box(root,gold,0,-.57,.15,.06,.08,.32);
     box(root,mat(0xe4d9b3),0,-.1,.42,.012,1,.012);
   }else if(style==='healer'){box(root,wood,0,-.2,0,.065,1.6,.065);box(root,mat(0x8ee6b1),0,.7,0,.26,.26,.26);}
+  else if(style==='melee'||style==='captain'){box(root,wood,0,-.45,0,.11,1.25,.11);box(root,steel,0,-1,0,.95,.45,.14);box(root,gold,0,-1,0,.2,.48,.18);}
   else{box(root,wood,0,-.26,0,.10,.7,.1);box(root,steel,0,-.93,0,.16,.8,.07);box(root,gold,0,-.54,0,.40,.08,.14);}
   return root;
 }
@@ -45,6 +47,26 @@ function healthBar(scene){
   const root=new THREE.Group();scene.add(root);
   const back=new THREE.Mesh(new THREE.PlaneGeometry(1.1,.10),new THREE.MeshBasicMaterial({color:0x24342e}));root.add(back);
   const fill=new THREE.Mesh(new THREE.PlaneGeometry(1,.06),new THREE.MeshBasicMaterial({color:0x95d1b6}));fill.position.z=.01;root.add(fill);return {root,fill};
+}
+function skillWarning(scene,friendly){
+  const root=new THREE.Group();scene.add(root);const color=friendly?0x8ee6c3:0xff7049;
+  const material=new THREE.MeshBasicMaterial({color,transparent:true,opacity:.28,side:THREE.DoubleSide,depthWrite:false});
+  const circle=new THREE.Mesh(new THREE.RingGeometry(.87,1,40),material);circle.rotation.x=-Math.PI/2;root.add(circle);
+  const lane=new THREE.Mesh(new THREE.PlaneGeometry(1,1),material);lane.rotation.x=-Math.PI/2;root.add(lane);
+  const half=Math.acos(BATTLE.sweep.cone),fan=new THREE.Mesh(new THREE.CircleGeometry(1,40,-Math.PI/2-half,half*2),material);fan.rotation.x=-Math.PI/2;root.add(fan);
+  root.visible=false;return {root,circle,lane,fan,material};
+}
+function updateWarning(view,unit){
+  const a=unit.action,rule=a&&BATTLE[a.id];view.root.visible=unit.alive&&!!a&&!a.hit;
+  view.circle.visible=view.lane.visible=view.fan.visible=false;
+  if(!view.root.visible)return;
+  view.root.position.set(unit.x,unit.y+.06,unit.z);view.root.rotation.y=Math.atan2(a.dx,a.dz);
+  const progress=Math.min(1,a.elapsed/(a.delay+(rule.impact??rule.duration)));view.material.opacity=(a.friendly?.15:.35)+progress*.3;
+  if(a.id==='charge'||a.id==='shot'){
+    const length=a.id==='charge'?rule.speed*rule.moveTime:Math.min(rule.range,Math.hypot(a.aim.x-unit.x,a.aim.z-unit.z));
+    view.lane.visible=true;view.lane.position.z=length/2;view.lane.scale.set(a.id==='shot'?.11:rule.radius*2,length,1);
+  }else if(a.id==='slam'){view.circle.visible=true;view.circle.position.z=rule.offset;view.circle.scale.setScalar(rule.radius);}
+  else if(a.id==='sweep'){view.fan.visible=true;view.fan.scale.setScalar(rule.radius);}
 }
 function fighter(scene,e){
   const root=new THREE.Group(),body=new THREE.Group();root.add(body);scene.add(root);
@@ -55,10 +77,11 @@ function fighter(scene,e){
   const arms=[],legs=[];
   for(const s of [-1,1]){const arm=new THREE.Group();body.add(arm);arm.position.set(s*.4,1.4,0);box(arm,coat,0,-.24,0,.23,.55,.25);box(arm,skin,0,-.55,0,.20,.14,.22);arms.push(arm);const leg=new THREE.Group();body.add(leg);leg.position.set(s*.17,.77,0);box(leg,dark,0,-.38,0,.25,.75,.3);legs.push(leg);}
   const held=weapon(e.style);held.position.y=-.5;arms[1].add(held);
+  const shield=box(arms[0],steel,0,-.25,.2,.75,.95,.16);shield.visible=e.style==='guard';
   const name=label(e.name,'#ffd3b4');name.position.y=3.1;root.add(name);
   const proxy=new THREE.Mesh(new THREE.SphereGeometry(.68,8,6),new THREE.MeshBasicMaterial({visible:false}));proxy.position.y=e.height*.5;proxy.userData.entityId=e.id;root.add(proxy);
   const telegraph=new THREE.Mesh(new THREE.RingGeometry(e.style==='captain'?2.6:1.4,e.style==='captain'?3:1.7,32),new THREE.MeshBasicMaterial({color:0xf17c52,transparent:true,opacity:.7,side:THREE.DoubleSide,depthWrite:false}));telegraph.rotation.x=-Math.PI/2;scene.add(telegraph);
-  return {root,body,arms,legs,coat,name,proxy,telegraph,bar:healthBar(scene)};
+  return {root,body,arms,legs,coat,name,proxy,shield,telegraph,warning:skillWarning(scene,false),bar:healthBar(scene)};
 }
 function disposeObject(root){root.traverse(o=>{o.geometry?.dispose();if(o.material){const materials=Array.isArray(o.material)?o.material:[o.material];for(const m of materials){if([wood,steel,dark,red,gold].includes(m))continue;m.map?.dispose();m.dispose();}}});root.removeFromParent();}
 export class RaidView {
@@ -67,7 +90,7 @@ export class RaidView {
     for(const [id,a] of villageView.actors){const held=weapon(ALLY_ROLES[id].style);held.position.y=-.45;a.arms[1].add(held);held.visible=false;
       const shield=box(a.arms[0],mat(0x638b80),0,-.30,.17,.55,.7,.12);shield.visible=false;
       const battleName=label(raids.village.residents.find(n=>n.id===id).name,'#bce6c8');battleName.position.y=2.65;battleName.scale.set(1.25,.26,1);battleName.visible=false;a.root.add(battleName);
-      this.friends.set(id,{held,shield,battleName,bar:healthBar(scene)});
+      this.friends.set(id,{held,shield,battleName,warning:skillWarning(scene,true),bar:healthBar(scene)});
     }
     const linesGeometry=new THREE.BufferGeometry();linesGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(6144),3));linesGeometry.setAttribute('color',new THREE.BufferAttribute(new Float32Array(6144),3));linesGeometry.setDrawRange(0,0);
     this.lines=new THREE.LineSegments(linesGeometry,new THREE.LineBasicMaterial({vertexColors:true,transparent:true,opacity:.85}));this.lines.frustumCulled=false;scene.add(this.lines);
@@ -82,17 +105,25 @@ export class RaidView {
     a.body.rotation.z=n.alive?0:Math.PI/2;a.body.position.y=n.alive?(n.hop??0):.15;
     if(n.offBalance>0)a.body.rotation.z=Math.sin(this.raids.elapsed*13)*.2;
     if(n.knockback)a.body.rotation.x=Math.sin(n.knockback.elapsed/n.knockback.duration*Math.PI)*-1.2;else a.body.rotation.x=0;
+    a.body.rotation.y=0;
+    if(n.action){const act=n.action,t=act.elapsed-act.delay;
+      if(act.id==='charge'){a.body.rotation.x=.35;a.arms[0].rotation.x=-1.3;a.arms[1].rotation.x=-.9;}
+      if(act.id==='slam'){a.arms[0].rotation.x=a.arms[1].rotation.x=t<.43?-2.8:-2.8+Math.min(1,(t-.43)/.21)*3.2;a.body.rotation.x=t<BATTLE.slam.impact?-.2:.45;}
+      if(act.id==='sweep'){a.body.rotation.y=t<.8?-.9:-.9+Math.min(1,(t-.8)/.5)*4.8;a.arms[1].rotation.x=-1.4;}
+      if(act.id==='shot'){a.arms[0].rotation.x=-1.35;a.arms[1].rotation.x=-1.7;}
+    }
+    if(n.dodge){a.body.rotation.x=-n.dodge.elapsed/BATTLE.evade.duration*Math.PI*2;a.body.position.y=.25;}
   }
   update(){
     const ids=new Set(this.raids.enemies.map(e=>e.id));
-    for(const [id,v] of this.enemies)if(!ids.has(id)){this.huntingView.proxies=this.huntingView.proxies.filter(p=>p!==v.proxy);disposeObject(v.root);disposeObject(v.bar.root);disposeObject(v.telegraph);this.enemies.delete(id);}
+    for(const [id,v] of this.enemies)if(!ids.has(id)){this.huntingView.proxies=this.huntingView.proxies.filter(p=>p!==v.proxy);disposeObject(v.root);disposeObject(v.bar.root);disposeObject(v.telegraph);disposeObject(v.warning.root);this.enemies.delete(id);}
     for(const e of this.raids.enemies){
       let v=this.enemies.get(e.id);if(!v){v=fighter(this.scene,e);this.enemies.set(e.id,v);this.huntingView.proxies.push(v.proxy);}
-      v.root.visible=e.alive;v.root.position.set(e.x,e.y,e.z);v.root.rotation.y=e.heading;this.pose(v,e);v.coat.emissive.setScalar(e.flash>0?.35:0);this.bar(v.bar,e,false);
+      v.root.visible=e.alive;v.root.position.set(e.x,e.y,e.z);v.root.rotation.y=e.heading;this.pose(v,e);v.coat.emissive.setHex(e.flash>0?0x555555:e.battlecry>0?0x603010:0);this.bar(v.bar,e,false);updateWarning(v.warning,e);v.shield.rotation.z=e.guardBroken>0?.8:0;
       v.proxy.position.y=e.height*.5+e.hop;v.name.visible=e.style==='captain';v.name.scale.set(2.25,.47,1);v.telegraph.visible=e.alive&&e.windup>0;v.telegraph.position.set(e.x,e.y+.045,e.z);
       v.telegraph.material.opacity=.3+.5*Math.sin(this.raids.elapsed*18)**2;
     }
-    for(const n of this.raids.village.residents){const v=this.friends.get(n.id),a=this.villageView.actors.get(n.id);v.held.visible=!!n.battle;v.battleName.visible=!!n.battle;v.shield.visible=n.battle&&n.style==='guard';v.bar.root.visible=!!n.battle;if(n.battle){a.title.visible=false;this.pose(a,n);this.bar(v.bar,n,true);if(!n.alive){v.bar.root.visible=true;v.bar.fill.scale.x=0;}}else{a.body.rotation.z=0;a.body.rotation.x=0;}}
+    for(const n of this.raids.village.residents){const v=this.friends.get(n.id),a=this.villageView.actors.get(n.id);v.held.visible=!!n.battle;v.battleName.visible=!!n.battle;v.shield.visible=n.battle&&n.style==='guard';v.bar.root.visible=!!n.battle;v.warning.root.visible=false;if(n.battle){a.title.visible=false;this.pose(a,n);this.bar(v.bar,n,true);updateWarning(v.warning,n);if(!n.alive){v.bar.root.visible=true;v.bar.fill.scale.x=0;}}else{a.body.rotation.z=0;a.body.rotation.x=0;a.body.rotation.y=0;}}
     const positions=[],colors=[];
     for(const t of this.raids.trails){positions.push(t.from.x,t.from.y,t.from.z,t.to.x,t.to.y,t.to.z);const c=new THREE.Color(t.heal?0x9ef9ab:t.friendly?0xbce8d5:0xffa36b);for(let i=0;i<2;i++)colors.push(c.r,c.g,c.b);}
     const count=Math.min(positions.length,6144),p=this.lines.geometry.attributes.position,c=this.lines.geometry.attributes.color;p.array.set(positions.slice(0,count));c.array.set(colors.slice(0,count));p.needsUpdate=c.needsUpdate=true;this.lines.geometry.setDrawRange(0,count/3);

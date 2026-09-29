@@ -3,12 +3,15 @@ import {segmentSphere,segmentBox} from './combat.js';
 import {inVillage,RESIDENTS} from './village-data.js';
 import {CAMP,BEACON,ALLY_ROLES,EXPEDITION} from './raid-data.js';
 import {RaidNavigation} from './raid-navigation.js';
+import {SoldierSkills} from './raid-skills.js';
+import {BATTLE,bowShot,guardedDamage} from './battle-rules.js';
 const distance=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
 
 export class Raids {
   constructor(combat,village){
     this.combat=combat;this.village=village;combat.raids=this;village.raids=this;
     this.nav=new RaidNavigation(combat.colliders);this.phase='idle';this.mode=null;this.wave=0;this.timer=0;this.elapsed=0;this.order='fight';this.enemies=[];this.allies=[];this.bolts=[];this.trails=[];this.serial=0;this.result=null;
+    this.skills=new SoldierSkills(this);
     this.beacon={...BEACON,id:'beacon',y:terrainHeight(BEACON.x,BEACON.z),hp:BEACON.maxHp,alive:true,height:2};
   }
   get active(){return ['preparing','fighting','interval'].includes(this.phase);}
@@ -17,7 +20,7 @@ export class Raids {
     if(this.active)return '이미 전투가 진행 중이에요.';
     if(this.combat.hp<=0)return '먼저 다시 일어나 주세요.';
     if(!inVillage(player.x,player.z))return 'B로 마을에 돌아와 출발 준비를 해 주세요.';
-    if(this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 준비해 주세요.';
+    if(this.combat.tactics?.busy||this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 준비해 주세요.';
     if(this.combat.sinceHit<6)return '잠시 숨을 고른 뒤 준비해 주세요.';
     return null;
   }
@@ -32,50 +35,57 @@ export class Raids {
     this.allies=participants.map((n,i)=>{
       const stats=ALLY_ROLES[n.id],x=mode==='defense'?stats.spot[0]:spot.x+1.6+Math.floor(i/2)*1.25,z=mode==='defense'?stats.spot[1]:spot.z+(i%2?2:-2);
       Object.assign(n,stats,{x,z,y:terrainHeight(x,z),combatRole:stats.role,battle:true,hp:stats.maxHp,alive:true,flash:0,swing:0,cooldown:i*.25,windup:0,target:null,moving:false,retreating:false,path:[],navClock:0});
-      return n;
+      this.skills.init(n,i);return n;
     });
     this.combat.events.push({type:'raid-notice',message:mode==='defense'?'습격 경보! 주민 10명과 서쪽 문을 지켜요.':`주민 ${participants.length}명과 출정했어요. 8초 뒤 야영지를 공격합니다.`});
     return {accepted:true};
   }
-  toggleOrder(){if(!this.active)return {accepted:false,reason:'전투 중에 주민에게 지시할 수 있어요.'};this.order=this.order==='fight'?'rally':'fight';for(const a of this.allies){a.windup=0;a.navClock=0;}return {accepted:true,message:this.order==='rally'?'주민들이 내게 모여요. 가까운 적에게만 대응합니다.':'교전 명령 · 주민들이 주변 적과 싸웁니다.'};}
+  toggleOrder(){if(!this.active)return {accepted:false,reason:'전투 중에 주민에게 지시할 수 있어요.'};this.order=this.order==='fight'?'rally':'fight';for(const a of this.allies){a.windup=0;a.action=null;a.followup=null;a.navClock=0;}return {accepted:true,message:this.order==='rally'?'주민들이 내게 모여요. 가까운 적에게만 대응합니다.':'교전 명령 · 주민들이 주변 적과 싸웁니다.'};}
   spawnWave(){
     const difficulty=1+Math.min(3,this.village.raidWins[this.mode])*.08;
-    const kinds=this.mode==='assault'?['melee','melee','melee','archer','archer','captain']:this.wave===1?['melee','melee','melee','archer','archer']:['melee','melee','melee','melee','archer','archer','captain'];
+    const kinds=this.mode==='assault'?['guard','guard','melee','archer','archer','captain']:this.wave===1?['guard','melee','melee','archer','archer']:['guard','guard','melee','melee','archer','archer','captain'];
     kinds.forEach((style,i)=>{
       const x=this.mode==='assault'?(style==='captain'?-35:-25-Math.floor(i/3)*4):1-Math.floor(i/3)*2.1;
       const z=this.mode==='assault'?15+(i%3-1)*3.2:15+(i%3-1)*2;
-      const maxHp=Math.round((style==='captain'?240:style==='archer'?78:110)*difficulty);
-      const e={id:`raider-${++this.serial}`,kind:'raider',raider:true,style,name:style==='captain'?'붉은발 대장':style==='archer'?'붉은발 궁수':'붉은발 약탈자',x,z,y:terrainHeight(x,z),homeX:x,homeZ:z,
+      const maxHp=Math.round((style==='captain'?240:style==='guard'?165:style==='archer'?78:110)*difficulty);
+      const e={id:`raider-${++this.serial}`,kind:'raider',raider:true,style,power:difficulty,name:style==='captain'?'붉은발 전사 대장':style==='guard'?'붉은발 방패병':style==='archer'?'붉은발 궁수':'붉은발 전사',x,z,y:terrainHeight(x,z),homeX:x,homeZ:z,
         hp:maxHp,maxHp,alive:true,radius:style==='captain'?.55:.4,height:style==='captain'?2.3:1.9,heading:Math.PI/2,hop:0,flash:0,windup:0,recovery:1+i*.2,stagger:0,offBalance:0,knockX:0,knockZ:0,knockback:null,lastPush:null,step:0,variant:0,moving:false,alert:true,
         damage:Math.round((style==='captain'?23:style==='archer'?12:14)*difficulty),range:style==='archer'?9:style==='captain'?2.5:1.75,interval:style==='captain'?2.6:2.2};
-      this.enemies.push(e);this.combat.entities.push(e);
+      this.skills.init(e,i);this.enemies.push(e);this.combat.entities.push(e);
     });
     this.phase='fighting';this.combat.events.push({type:'raid-notice',message:this.mode==='defense'?`${this.wave}/2차 습격 · 서쪽 문을 지켜 주세요!`:'붉은발 대장을 포함한 적 6명을 처치하세요.'});
   }
   visible(a,b){return Math.abs((a.y??0)-(b.y??0))<3&&this.combat.unobstructed({x:a.x,y:(a.y??0)+1,z:a.z},{x:b.x,y:(b.y??0)+1,z:b.z});}
   playerTarget(player){return {id:'player',...player,hp:this.combat.hp,maxHp:this.combat.maxHp,alive:this.combat.hp>0};}
   friendlies(player){return [...this.allies.filter(a=>a.alive),this.playerTarget(player)];}
-  hitAlly(target,amount){
-    if(target.id==='player')return this.combat.damagePlayer(amount);
+  hitAlly(target,amount,context={}){
+    if(target.id==='player'){
+      const hit=this.combat.damagePlayer(amount);
+      if(hit&&context.stagger&&this.combat.hp>0){this.combat.tactics.stagger=Math.max(this.combat.tactics.stagger,context.stagger);this.combat.warrior.cancel();this.combat.cancelDraw();}
+      return hit;
+    }
     if(!target.alive)return false;
-    const damage=Math.max(1,amount-(target.style==='guard'?4:0));target.hp=Math.max(0,target.hp-damage);target.flash=.22;
+    if(target.dodge&&target.dodge.elapsed<BATTLE.evade.invulnerable)return false;
+    const guard=guardedDamage(target,Math.max(1,amount-(target.style==='guard'?4:0)),context.dx??0,context.dz??0),damage=guard.damage;target.hp=Math.max(0,target.hp-damage);target.flash=.22;
+    if(context.stagger){target.stagger=Math.max(target.stagger??0,context.stagger);target.windup=0;}
     this.combat.events.push({type:'ally-hit',x:target.x,y:target.y+2,z:target.z,damage});
     if(target.hp===0){target.alive=false;target.windup=0;target.moving=false;this.combat.events.push({type:'raid-notice',message:target.id==='beacon'?'마을 깃발이 쓰러졌어요.':`${target.name} 쓰러짐 · 전투 후 회복`});}
     return true;
   }
   shoot(from,to,friendly){
-    const start={x:from.x,y:from.y+1.3,z:from.z},dx=to.x-start.x,dy=(to.y??0)+.9-start.y,dz=to.z-start.z,len=Math.hypot(dx,dy,dz)||1;
-    this.bolts.push({...start,vx:dx/len*17,vy:dy/len*17,vz:dz/len*17,life:1.6,friendly,damage:from.damage});
+    const start={x:from.x,y:from.y+1.3,z:from.z},dx=to.x-start.x,dy=(to.y??0)+.9-start.y,dz=to.z-start.z,len=Math.hypot(dx,dy,dz)||1,{speed}=bowShot(.35);
+    this.bolts.push({...start,vx:dx/len*speed,vy:dy/len*speed,vz:dz/len*speed,life:1.6,friendly,gravity:1.7,damage:Math.round(from.damage*(from.battlecry>0?BATTLE.battlecry.damage:1))});
   }
   strike(unit,target,player,friendly){
     unit.swing=.32;if(!target?.alive)return;
     if(distance(unit,target)>unit.range+.55||!this.visible(unit,target))return;
     if(unit.style==='archer'){this.shoot(unit,target,friendly);return;}
-    if(friendly){const d=distance(unit,target)||1;this.combat.damageEntity(target,unit.damage,(target.x-unit.x)/d,(target.z-unit.z)/d,{source:'ally',preserveOpening:true});}
+    const amount=Math.round(unit.damage*(unit.battlecry>0?BATTLE.battlecry.damage:1)),d=distance(unit,target)||1,context={dx:(target.x-unit.x)/d,dz:(target.z-unit.z)/d};
+    if(friendly){this.combat.damageEntity(target,amount,context.dx,context.dz,{source:'ally',preserveOpening:true});}
     else if(unit.style==='captain'){
       // The red circle previews a short cleave that can be dodged or interrupted by a kick.
-      for(const a of [...this.friendlies(player),...(this.mode==='defense'?[this.beacon]:[])])if(distance(unit,a)<3&&this.visible(unit,a))this.hitAlly(a,unit.damage);
-    }else this.hitAlly(target,unit.damage);
+      for(const a of [...this.friendlies(player),...(this.mode==='defense'?[this.beacon]:[])])if(distance(unit,a)<3&&this.visible(unit,a))this.hitAlly(a,amount,context);
+    }else this.hitAlly(target,amount,context);
   }
   heal(unit,player,dt){
     const friends=this.friendlies(player).filter(a=>a.hp<a.maxHp&&distance(unit,a)<11).sort((a,b)=>a.hp/a.maxHp-b.hp/b.maxHp);
@@ -89,7 +99,7 @@ export class Raids {
     }return true;
   }
   updateAlly(a,index,dt,player){
-    a.moving=false;a.cooldown=Math.max(0,a.cooldown-dt);a.flash=Math.max(0,a.flash-dt);a.swing=Math.max(0,a.swing-dt);if(!a.alive)return;
+    a.moving=false;a.cooldown=Math.max(0,a.cooldown-dt);a.flash=Math.max(0,a.flash-dt);a.swing=Math.max(0,a.swing-dt);if(this.skills.tick(a,dt,player,true)||!a.alive)return;
     const anchor=this.mode==='defense'&&this.order==='fight'?{x:a.spot[0],z:a.spot[1]}:{x:player.x+Math.cos(index*2.4)*2.3,z:player.z+Math.sin(index*2.4)*2.3};
     if(a.hp<a.maxHp*.25)a.retreating=true;else if(a.hp>a.maxHp*.55)a.retreating=false;
     if(a.retreating){a.windup=0;const rear=this.mode==='defense'?{x:20,z:18}:anchor;if(distance(a,rear)>1)this.nav.move(a,rear,3.1,dt);if(a.style==='healer')this.heal(a,player,dt);return;}
@@ -98,18 +108,20 @@ export class Raids {
     const target=this.enemies.filter(e=>e.alive&&distance(e,anchor)<leash+3&&distance(e,a)<leash).sort((b,c)=>distance(a,b)-distance(a,c))[0];
     if(a.style!=='healer'&&target){
       if(a.windup>0){a.windup=Math.max(0,a.windup-dt);if(a.windup===0){this.strike(a,this.enemies.find(e=>e.id===a.target),player,true);a.cooldown=a.interval;}return;}
+      if(this.skills.choose(a,target,player,true))return;
       a.heading=Math.atan2(target.x-a.x,target.z-a.z);
       if(distance(a,target)>a.range||!this.visible(a,target))this.nav.move(a,target,3,dt);
       else if(a.cooldown<=0){a.windup=.4;a.target=target.id;}
     }else{a.windup=0;if(distance(a,anchor)>.7)this.nav.move(a,anchor,3,dt);}
   }
   updateEnemy(e,dt,player){
-    e.moving=false;e.swing=Math.max(0,(e.swing??0)-dt);if(!e.alive||e.knockback||e.stagger>0)return;
+    e.moving=false;e.swing=Math.max(0,(e.swing??0)-dt);if(this.skills.tick(e,dt,player,false)||!e.alive||e.knockback||e.stagger>0)return;
     const friends=this.friendlies(player);
     if(this.mode==='defense')friends.push(this.beacon);
     const nearby=friends.filter(a=>a.alive).sort((a,b)=>distance(e,a)-distance(e,b));
     const target=nearby[0];if(!target)return;
     if(e.windup>0){e.windup=Math.max(0,e.windup-dt);if(e.windup===0){this.strike(e,friends.find(a=>a.id===e.target),player,false);e.recovery=e.interval;}return;}
+    if(this.skills.choose(e,target,player,false))return;
     e.heading=Math.atan2(target.x-e.x,target.z-e.z);
     if(distance(e,target)>e.range||!this.visible(e,target))this.nav.move(e,target,e.style==='captain'?2:2.5,dt);
     else if(e.recovery<=0){e.windup=e.style==='captain'?.95:.65;e.target=target.id;}
@@ -121,7 +133,8 @@ export class Raids {
       const targets=b.friendly?this.enemies:this.friendlies(player).concat(this.mode==='defense'?[this.beacon]:[]);
       for(const a of targets){if(!a.alive)continue;const t=segmentSphere(b,next,{x:a.x,y:a.y+.9+(a.hop??0),z:a.z},a.id==='beacon'?.65:.5);if(t!==null&&t<nearest){nearest=t;blocked=false;hit=a;}}
       this.trails.push({from:{x:b.x,y:b.y,z:b.z},to:{x:b.x+(next.x-b.x)*nearest,y:b.y+(next.y-b.y)*nearest,z:b.z+(next.z-b.z)*nearest},life:.13,friendly:b.friendly});
-      if(hit){if(b.friendly)this.combat.damageEntity(hit,b.damage,0,0,{source:'ally',preserveOpening:true});else this.hitAlly(hit,b.damage);b.life=0;}
+      if(hit){const length=Math.hypot(b.vx,b.vz)||1;if(b.friendly)this.combat.damageEntity(hit,b.damage,b.vx/length,b.vz/length,{source:'ally',preserveOpening:true});else this.hitAlly(hit,b.damage,{dx:b.vx/length,dz:b.vz/length});b.life=0;}
+      b.vy-=(b.gravity??0)*dt;
       if(blocked||next.y<terrainHeight(next.x,next.z))b.life=0;Object.assign(b,next);
     }this.bolts=this.bolts.filter(b=>b.life>0);
   }
@@ -165,9 +178,9 @@ export class Raids {
   abort(){if(this.active)this.finish(false,'전투를 중단했어요.');}
   cleanup(){
     this.combat.entities=this.combat.entities.filter(e=>!e.raider);this.enemies=[];this.bolts=[];this.trails=[];
-    for(const a of this.allies){const original=RESIDENTS.find(n=>n.id===a.id);Object.assign(a,{...original,x:original.x,z:original.z,y:terrainHeight(original.x,original.z),alive:true,hp:a.maxHp,battle:false,moving:false,windup:0,swing:0,step:0,wait:1,routeIndex:0,path:[]});}
+    for(const a of this.allies){const original=RESIDENTS.find(n=>n.id===a.id);Object.assign(a,{...original,x:original.x,z:original.z,y:terrainHeight(original.x,original.z),alive:true,hp:a.maxHp,battle:false,moving:false,windup:0,swing:0,step:0,wait:1,routeIndex:0,path:[]});this.skills.init(a);}
     this.allies=[];
   }
   state(){return {active:this.active,mode:this.mode,phase:this.phase,wave:this.wave,timer:Math.max(0,+this.timer.toFixed(1)),order:this.order,remaining:this.enemies.filter(e=>e.alive).length,beaconHp:Math.ceil(this.beacon.hp),wins:{...this.village.raidWins},result:this.result,
-    allies:this.allies.map(a=>({id:a.id,name:a.name,role:a.combatRole,health:Math.ceil(a.hp),maxHp:a.maxHp,alive:a.alive,retreating:a.retreating,x:+a.x.toFixed(2),z:+a.z.toFixed(2)}))};}
+    allies:this.allies.map(a=>({id:a.id,name:a.name,role:a.combatRole,health:Math.ceil(a.hp),maxHp:a.maxHp,alive:a.alive,retreating:a.retreating,x:+a.x.toFixed(2),z:+a.z.toFixed(2),skills:this.skills.state(a)})),enemies:this.enemies.map(e=>({id:e.id,name:e.name,health:e.hp,alive:e.alive,x:e.x,z:e.z,skills:this.skills.state(e)}))};}
 }

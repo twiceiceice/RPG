@@ -40,7 +40,12 @@ export class GameAudio{
     if(!this.context||this.context.state!=='running'||!this.playing||!this.settings.enabled||document.hidden)return;
     const t=this.context.currentTime,skill=event.skill,type=event.type;
     const group=type==='hit'?'hit':type;if(t-(this.last[group]??-100)<(type==='hit'?.075:.025))return;this.last[group]=t;
-    if(type==='warrior-start'){
+    if(type==='evade')this.noiseSound(t,.22,.22,1700,350);
+    else if(type==='battlecry'||type==='soldier-buff'){this.tone(130,t,.55,.22,'triangle',this.effects,220);this.tone(195,t+.05,.45,.12,'sine',this.effects,330);}
+    else if(type==='guard-break'){this.noiseSound(t,.18,.24,1300,170);this.tone(240,t,.2,.16,'triangle',this.effects,80);}
+    else if(type==='guard-block')this.tone(700,t,.12,.10,'triangle',this.effects,350);
+    else if(type==='soldier-impact'){if(skill==='shot')this.noiseSound(t,.1,.07,2500,700);else{this.noiseSound(t,.16,.08,skill==='slam'?400:1300,150);this.tone(90,t,.15,.08,'sine',this.effects,40);}}
+    else if(type==='warrior-start'){
       if(skill==='charge'){this.noiseSound(t,.34,.22,350,1900);this.tone(150,t,.24,.16,'triangle',this.effects,75);}
       if(skill==='slam')this.noiseSound(t+.25,.33,.18,500,1700);
       if(skill==='kick')this.noiseSound(t+.08,.28,.22,1800,320);

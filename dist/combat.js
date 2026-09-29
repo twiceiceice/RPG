@@ -1,6 +1,8 @@
 import { terrainHeight, overlaps, WORLD_RADIUS } from './movement.js';
 import { Warrior } from './warrior.js';
 import { Forestry } from './forestry.js';
+import { Tactics } from './tactics.js';
+import { BATTLE, bowShot, guardedDamage } from './battle-rules.js';
 
 const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
 export function segmentSphere(a, b, center, radius) {
@@ -36,6 +38,7 @@ export class Hunting {
     this.autoAttackRecovery=false;this.meleeFacing=null;
     this.autoMelee={targetId:null,attacks:0};
     this.warrior=new Warrior(this);
+    this.tactics=new Tactics(this);
     this.forestry=new Forestry(this,trees);
     const rabbits=[[-3,2],[4,-2],[-5,-10],[10,-11],[-13,5],[12,10]];
     const slimes=[[4,-9],[-2,-17],[12,-22],[-14,-23],[20,-6]];
@@ -54,7 +57,9 @@ export class Hunting {
   get maxHp(){return this.progression?.bonuses.maxHp??100;}
   get criticalMultiplier(){return this.progression?.bonuses.critical??2;}
   talentDamage(entity,damage,context){
-    if(!this.progression||context.source==='ally')return damage;
+    if(context.source==='ally')return damage;
+    if(this.tactics.battlecry>0)damage*=BATTLE.battlecry.damage;
+    if(!this.progression)return Math.round(damage);
     const p=this.progression,b=p.bonuses;damage*=b.damage;
     if(context.source==='slam')damage*=b.slam;
     if(context.source==='spin')damage*=b.spin;
@@ -62,6 +67,7 @@ export class Hunting {
     return Math.max(1,Math.round(damage));
   }
   restorePlayer() {
+    this.tactics.reset();
     this.cancelDraw();this.warrior.cancel(true);this.hp=this.maxHp;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
     this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.knockback=null;e.lastPush=null;e.hop=0;e.knockX=e.knockZ=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
     this.autoAttackRecovery=false;this.meleeFacing=null;this.autoMelee={targetId:null,attacks:0};
@@ -74,6 +80,12 @@ export class Hunting {
     damage=this.talentDamage(e,damage,context);
     if(e.kind==='tree')return this.forestry.damage(e,damage,dx,dz,context);
     if(!e.alive||damage<=0)return;
+    if(e.dodge&&e.dodge.elapsed<BATTLE.evade.invulnerable)return {damage:0,critical:false,killed:false,evaded:true};
+    if(e.raider){
+      if(context.source==='kick'){e.guardBroken=4;this.events.push({type:'guard-break',x:e.x,y:e.y+2,z:e.z});}
+      const guard=guardedDamage(e,damage,dx,dz);damage=guard.damage;
+      if(guard.blocked)this.events.push({type:'guard-block',x:e.x,y:e.y+2,z:e.z});
+    }
     const critical=(!context.preserveOpening&&e.offBalance>0)||context.forceCritical===true;
     if(critical){damage=Math.round(damage*this.criticalMultiplier);e.offBalance=0;this.criticalHits++;}
     e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=dx*4;e.knockZ=dz*4;
@@ -95,7 +107,7 @@ export class Hunting {
     e.lastPush={power:power.id,requested:power.distance,travelled:0,blocked:false};
   }
   beginDraw() {
-    if(this.inSanctuary||this.weapon!=='bow'||this.hp<=0||this.cooldown>0||this.drawing)return false;
+    if(this.tactics.busy||this.inSanctuary||this.weapon!=='bow'||this.hp<=0||this.cooldown>0||this.drawing)return false;
     this.drawing=true;this.charge=0;this.release=0;return true;
   }
   cancelDraw() { this.drawing=false;this.charge=0; }
@@ -109,11 +121,12 @@ export class Hunting {
     const start={x:player.x+dz*.22,y:player.y+1.42,z:player.z-dx*.22};
     const target=aimPoint??{x:start.x+direction.x*40,y:start.y+(direction.y||0)*40,z:start.z+direction.z*40};
     const ax=target.x-start.x,ay=target.y-start.y,az=target.z-start.z,n=Math.hypot(ax,ay,az)||1;
-    const speed=19+25*charge,damage=Math.round(24+36*charge);
+    const {speed,damage}=bowShot(charge);
     this.arrows.push({id:this.nextArrow++,x:start.x,y:start.y,z:start.z,vx:ax/n*speed,vy:ay/n*speed,vz:az/n*speed,damage,life:4});
     this.events.push({type:'shoot',charge});return true;
   }
   attack(player,direction) {
+    if(this.tactics.busy)return false;
     if(this.village?.isSafe(player))return false;
     if(this.weapon==='axe') {
       const attacked=this.warrior.basicAttack(player,direction);
@@ -142,7 +155,7 @@ export class Hunting {
   autoAttack(player) {
     this.autoMelee.targetId=null;
     const w=this.warrior;
-    if(this.village?.isSafe(player) || this.hp<=0 || !player.grounded || !['axe','sword'].includes(this.weapon)
+    if(this.tactics.busy || this.village?.isSafe(player) || this.hp<=0 || !player.grounded || !['axe','sword'].includes(this.weapon)
       || w.active || w.planted || w.queued || (w.combo.step>0 && w.combo.remaining>0))return false;
     const range=this.weapon==='axe'?2.7:2.6;
     let target=null,nearest=Infinity;
@@ -172,8 +185,9 @@ export class Hunting {
     return true;
   }
   damagePlayer(amount) {
+    if(this.tactics.invulnerable){this.tactics.dodged++;return false;}
     if(this.inSanctuary||this.hp<=0||this.invincible>0)return false;
-    const bonuses=this.progression?.bonuses;amount=Math.max(1,Math.round((amount-this.armorLevel*2-(bonuses?.reduction??0))*(1-(bonuses?.mitigation??0))));
+    const bonuses=this.progression?.bonuses;amount=Math.max(1,Math.round((amount-this.armorLevel*2-(bonuses?.reduction??0))*(1-(bonuses?.mitigation??0))*(this.tactics.battlecry>0?BATTLE.battlecry.taken:1)));
     this.hp=Math.max(0,this.hp-amount);this.invincible=.65;this.hurt=.32;this.sinceHit=0;
     this.events.push({type:'hurt',damage:amount});
     if(this.hp===0){this.cancelDraw();this.warrior.cancel(false,true);this.events.push({type:'player-defeat'});}
@@ -197,13 +211,14 @@ export class Hunting {
       this.swing=0;this.autoMelee.targetId=null;
     }
     this.time+=dt;this.cooldown=Math.max(0,this.cooldown-dt);this.swing=Math.max(0,this.swing-dt);this.release=Math.max(0,this.release-dt);
+    this.tactics.update(dt);
     // The attack interval is independent of short swing recovery, so skills
     // remain responsive and cancelling a swing cannot reset basic-attack cadence.
     this.meleeCooldown=Math.max(0,this.meleeCooldown-dt);
     if(this.cooldown===0)this.autoAttackRecovery=false;
     if(this.drawing)this.charge=Math.min(1,this.charge+dt/1.05);
     this.invincible=Math.max(0,this.invincible-dt);this.hurt=Math.max(0,this.hurt-dt);this.sinceHit+=dt;
-    for(const e of this.entities)e.offBalance=Math.max(0,e.offBalance-dt);
+    for(const e of this.entities){e.offBalance=Math.max(0,e.offBalance-dt);e.guardBroken=Math.max(0,(e.guardBroken??0)-dt);}
     this.warrior.update(dt,player);
     this.forestry.update(dt,player);
     if(this.hp>0&&this.sinceHit>6)this.hp=Math.min(this.maxHp,this.hp+4*dt);

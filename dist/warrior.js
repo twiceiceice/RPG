@@ -1,14 +1,15 @@
 import { terrainHeight } from './movement.js';
 import { KickPower } from './kick-power.js';
+import { BATTLE, inAttackArea } from './battle-rules.js';
 
 export const SPIN = Object.freeze({ duration: 2.5, maxDuration: 4, interval: .25, radius: 3.2, pullRadius: 6, pullSpeed: 6, damage: 8, empoweredDamage: 10, criticalExtension: .25, killExtension: .5 });
 const comboOrder = ['charge', 'slam', 'kick', 'sweep'];
 const aimsOnStart = id => id === 'kick' || id === 'sweep';
 export const WARRIOR_SKILLS = [
-  { id: 'charge', key: '1', name: '돌진', detail: '전방으로 돌파', duration: .52, cooldown: 4 },
-  { id: 'slam', key: '2', name: '내려찍기', detail: '날을 세워 땅에 내려찍기', duration: 1.08, cooldown: 3.5 },
+  { id: 'charge', key: '1', ...BATTLE.charge, detail: '전방으로 돌파' },
+  { id: 'slam', key: '2', ...BATTLE.slam, detail: '날을 세워 땅에 내려찍기' },
   { id: 'kick', key: '3', name: '날아차기', detail: '도끼를 짚고 앞으로 날아차기', duration: 1.14, cooldown: 1.2 },
-  { id: 'sweep', key: '4', name: '가로베기', detail: '도끼를 끌어와 크게 가로베기', duration: 1.65, cooldown: 1.8 },
+  { id: 'sweep', key: '4', ...BATTLE.sweep, detail: '도끼를 끌어와 크게 가로베기' },
   { id: 'spin', key: '5', name: '회전베기', detail: '4연계 적중으로 여는 궁극기', duration: SPIN.duration, cooldown: 0 },
 ];
 const skillById = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, s]));
@@ -31,6 +32,7 @@ export class Warrior {
     if (resetCooldowns) { for (const id in this.cooldowns) this.cooldowns[id] = 0; this.lastKick = null; this.ultimate.lastSpin = null; this.combo.failure = null; }
   }
   reason(id, player) {
+    if(this.combat.tactics?.busy)return '회피와 경직이 끝나면 사용할 수 있어요.';
     if(this.combat.village?.isSafe(player))return '마을에서는 무기를 쉬게 해 주세요. 서쪽 문을 나가면 전투할 수 있어요.';
     if (!skillById[id]) return '알 수 없는 기술이에요.';
     if (this.combat.hp <= 0) return '먼저 다시 일어나 주세요.';
@@ -45,6 +47,7 @@ export class Warrior {
     return null;
   }
   request(id, player, direction) {
+    if(this.combat.tactics?.busy)return {accepted:false,reason:this.reason(id,player)};
     if(this.combat.village?.isSafe(player))return {accepted:false,reason:this.reason(id,player)};
     if (!skillById[id]) return { accepted: false, reason: '알 수 없는 기술이에요.' };
     this.setAim(direction);
@@ -116,7 +119,8 @@ export class Warrior {
     }
   }
   spinTargets(player, radius) {
-    return this.combat.targets().filter(e => e.alive && Math.hypot(e.x-player.x,e.z-player.z) <= radius+e.radius
+    return this.combat.targets().filter(e => e.alive && !(e.dodge && e.dodge.elapsed < BATTLE.evade.invulnerable)
+      && Math.hypot(e.x-player.x,e.z-player.z) <= radius+e.radius
       && Math.abs(e.y+e.hop-player.y) < 1.8
       && this.combat.unobstructed({x:player.x,y:player.y+.9,z:player.z},{x:e.x,y:e.y+e.hop+.6,z:e.z},e.collider));
   }
@@ -155,6 +159,7 @@ export class Warrior {
     this.ultimate.lastSpin = { stage:a.stage, duration:a.duration, hits:a.hits, criticalPulses:a.criticalPulses, kills:a.kills, extended:a.extended };
   }
   basicAttack(player, direction) {
+    if(this.combat.tactics?.busy)return false;
     if(this.combat.village?.isSafe(player))return false;
     if (this.active || this.planted || this.combat.cooldown > 0 || this.combat.meleeCooldown > 1e-8 || this.combat.hp <= 0) return false;
     this.start('slash', player, direction); this.combat.cooldown = .62; this.combat.meleeCooldown = this.combat.meleeInterval; return true;
@@ -168,7 +173,7 @@ export class Warrior {
         const length = Math.max(1, Math.hypot(input.x,input.z));
         input.forcedVelocity = { x: input.x/length*3.4, z: input.z/length*3.4 }; return;
       }
-      let speed = a.id === 'charge' && a.elapsed < .36 && !a.stopped ? 27 : 0;
+      let speed = a.id === 'charge' && a.elapsed < BATTLE.charge.moveTime && !a.stopped ? BATTLE.charge.speed : 0;
       if (a.id === 'kick' && a.elapsed >= .14 && a.elapsed < .66) speed = 6.2;
       if (a.id === 'sweep' && a.elapsed >= .76 && a.elapsed < 1.17) {
         speed = 4.5;
@@ -189,16 +194,15 @@ export class Warrior {
     const a = this.active, combat = this.combat; let hits = 0;
     for (const e of combat.targets()) {
       if (!e.alive || a.hitIds.has(e.id)) continue;
-      const ex = e.x - player.x, ez = e.z - player.z, distance = Math.hypot(ex, ez);
-      if (Math.hypot(e.x - x, e.z - z) > radius + e.radius || Math.abs(e.y + e.hop - player.y) > 1.7) continue;
-      if (distance > .15 && (ex * a.dx + ez * a.dz) / distance < cone) continue;
+      if(!inAttackArea(player,{x:a.dx,z:a.dz},e,{x,z,radius,cone}))continue;
       if (!combat.unobstructed({ x: player.x, y: player.y + .9, z: player.z }, { x: e.x, y: e.y + .6 + e.hop, z: e.z }, e.collider)) continue;
       if (kick && !a.kickPower) {
         a.kickPower = this.kickPower.roll();
         this.lastKick = { ...a.kickPower, targetId: e.id, time: combat.time };
       }
       const context = kick ? { source: 'kick', kickPower: a.kickPower.id, powerName: a.kickPower.name } : {source:a.id};
-      a.hitIds.add(e.id); combat.damageEntity(e, kick ? a.kickPower.damage : damage, a.dx, a.dz, context);
+      a.hitIds.add(e.id); const result=combat.damageEntity(e, kick ? a.kickPower.damage : damage, a.dx, a.dz, context);
+      if(result?.evaded)continue;
       if (offBalance > 0) combat.applyOffBalance(e, offBalance);
       if(e.kind!=='tree'){e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);}
       if (kick) combat.launchEntity(e, a.dx, a.dz, a.kickPower);
@@ -234,23 +238,23 @@ export class Warrior {
     }
     if (a.id === 'sweep' && a.elapsed >= .74) this.planted = null;
     if (a.id === 'charge' && a.elapsed < .4 && !a.stopped) {
-      if (this.hitArea(player, { radius: 1.2, damage: 8, cone: .4, knock: 1, stagger: .65 })) {
+      if (this.hitArea(player, BATTLE.charge)) {
         a.stopped = true; this.impact(player, 'charge');
       }
     }
-    const impactTime = { slam: .64, sweep: 1.06, slash: .26 }[a.id];
+    const impactTime = { slam: BATTLE.slam.impact, sweep: BATTLE.sweep.impact, slash: .26 }[a.id];
     if (!a.hit && impactTime !== undefined && a.elapsed >= impactTime) {
       a.hit = true;
       if (a.id === 'slam') {
-        let reach = 1.45;
+        let reach = BATTLE.slam.offset;
         const origin = { x: player.x, y: player.y + .5, z: player.z };
         while (reach > .2 && !this.combat.unobstructed(origin, { x: player.x + a.dx * (reach+.25), y: player.y + .5, z: player.z + a.dz * (reach+.25) })) reach = Math.max(.2,reach-.15);
         const x = player.x + a.dx * reach, z = player.z + a.dz * reach;
         this.planted = { x, y: Math.max(player.y, terrainHeight(x, z)), z, dx: a.dx, dz: a.dz, remaining: 3.4+(this.combat.progression?.bonuses.combo??0), kicked: false };
         a.anchor = { ...this.planted };
-        this.hitArea(player, { x, z, radius: 1.65, damage: 39, cone: -.1, knock: .6, stagger: 1.65 }); this.impact(player, 'slam', x, z);
+        this.hitArea(player, { ...BATTLE.slam,x,z }); this.impact(player, 'slam', x, z);
       } else if (a.id === 'sweep') {
-        this.hitArea(player, { radius: 4.3, damage: 38, cone: -.35, knock: 9, stagger: .9 }); this.impact(player, 'sweep'); this.planted = null;
+        this.hitArea(player, BATTLE.sweep); this.impact(player, 'sweep'); this.planted = null;
       } else {
         this.hitArea(player, { radius: 2.7, damage: 24, cone: .25 }); this.impact(player, 'slash');
       }
