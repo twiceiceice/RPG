@@ -152,8 +152,8 @@ export class Warrior {
     this.ultimate.lastSpin = { stage:a.stage, duration:a.duration, hits:a.hits, criticalPulses:a.criticalPulses, kills:a.kills, extended:a.extended };
   }
   basicAttack(player, direction) {
-    if (this.active || this.planted || this.combat.cooldown > 0 || this.combat.hp <= 0) return false;
-    this.start('slash', player, direction); this.combat.cooldown = .62; return true;
+    if (this.active || this.planted || this.combat.cooldown > 0 || this.combat.meleeCooldown > 1e-8 || this.combat.hp <= 0) return false;
+    this.start('slash', player, direction); this.combat.cooldown = .62; this.combat.meleeCooldown = this.combat.meleeInterval; return true;
   }
   movement(input, player) {
     input.forcedVelocity = null;

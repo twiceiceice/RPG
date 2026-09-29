@@ -29,6 +29,7 @@ export class Hunting {
   constructor(colliders=[],trees=[]) {
     this.colliders=colliders;this.entities=[];this.arrows=[];this.events=[];
     this.weapon='sword';this.cooldown=0;this.swing=0;this.hp=100;this.invincible=0;
+    this.meleeInterval=2;this.meleeCooldown=0;
     this.drawing=false;this.charge=0;this.release=0;this.lastCharge=0;
     this.hurt=0;this.sinceHit=100;this.kills={rabbit:0,slime:0};this.time=0;this.nextArrow=1;
     this.criticalHits=0;this.lastHit=null;
@@ -54,6 +55,7 @@ export class Hunting {
     this.cancelDraw();this.warrior.cancel(true);this.hp=100;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
     this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.knockback=null;e.lastPush=null;e.hop=0;e.knockX=e.knockZ=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
     this.autoAttackRecovery=false;this.meleeFacing=null;this.autoMelee={targetId:null,attacks:0};
+    this.meleeCooldown=0;
     for(const tree of this.forestry.trees){tree.offBalance=0;tree.flash=0;}
   }
   targets() { return this.entities.concat(this.forestry.trees); }
@@ -106,12 +108,12 @@ export class Hunting {
       if(attacked)this.autoAttackRecovery=false;
       return attacked;
     }
-    if(this.weapon!=='sword'||this.hp<=0||this.cooldown>0)return false;
+    if(this.weapon!=='sword'||this.hp<=0||this.cooldown>0||this.meleeCooldown>1e-8)return false;
     const length=Math.hypot(direction.x,direction.z)||1;
     const dx=direction.x/length,dz=direction.z/length;
     if(this.weapon==='sword') {
       this.autoAttackRecovery=false;this.meleeFacing={x:dx,z:dz};
-      this.cooldown=.43;this.swing=.34;
+      this.cooldown=.43;this.swing=.34;this.meleeCooldown=this.meleeInterval;
       this.events.push({type:'swing',x:player.x,y:player.y+.9,z:player.z,dx,dz});
       for(const e of this.targets()) {
         if(!e.alive)continue;
@@ -145,7 +147,7 @@ export class Hunting {
     }
     if(!target)return false;
     this.autoMelee.targetId=target.id;
-    if(this.cooldown>0)return false;
+    if(this.cooldown>0||this.meleeCooldown>1e-8)return false;
     const direction=nearest>1e-6?{x:(target.x-player.x)/nearest,z:(target.z-player.z)/nearest}:w.aimDirection??{x:0,z:1};
     const motion={vx:player.vx,vz:player.vz,jumpBuffer:player.jumpBuffer};
     if(!this.attack(player,direction))return false;
@@ -176,6 +178,9 @@ export class Hunting {
   }
   update(dt,player) {
     this.time+=dt;this.cooldown=Math.max(0,this.cooldown-dt);this.swing=Math.max(0,this.swing-dt);this.release=Math.max(0,this.release-dt);
+    // The attack interval is independent of short swing recovery, so skills
+    // remain responsive and cancelling a swing cannot reset basic-attack cadence.
+    this.meleeCooldown=Math.max(0,this.meleeCooldown-dt);
     if(this.cooldown===0)this.autoAttackRecovery=false;
     if(this.drawing)this.charge=Math.min(1,this.charge+dt/1.05);
     this.invincible=Math.max(0,this.invincible-dt);this.hurt=Math.max(0,this.hurt-dt);this.sinceHit+=dt;

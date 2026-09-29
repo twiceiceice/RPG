@@ -104,7 +104,7 @@ function equipWeapon(weapon) {
     $(id).classList.toggle('selected', selected); $(id).setAttribute('aria-pressed', String(selected));
   }
   $('weapon-name').textContent = axe ? '양손 도끼' : bow ? '들판의 활' : '여행자의 칼';
-  $('weapon-hint').textContent = axe ? '근접 자동 공격 · 1~5 기술' : bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '근접 자동 공격 · 좌클릭 / F 직접 베기';
+  $('weapon-hint').textContent = axe ? '2초마다 자동 공격 · 1~5 기술' : bow ? '좌클릭 / F 꾹 당기기 · 놓으면 발사' : '2초마다 자동 공격 · 좌클릭 / F 직접 베기';
   $('warrior-hud').hidden = !axe;
   $('touch-attack').textContent = bow ? '당기기' : '공격';
   $('touch-attack').setAttribute('aria-label', bow ? '누르고 활 당기기, 놓으면 발사' : axe ? '도끼 기본 공격' : '칼로 공격');
@@ -453,7 +453,7 @@ function combatFeedback(dt) {
   if (!paused) hitFeedback = Math.max(0, hitFeedback - dt);
   $('crosshair').classList.toggle('hit', hitFeedback > 0);
   $('damage-flash').style.opacity = String(hunting.hurt * 2);
-  $('cooldown-fill').style.width = `${Math.max(0, 1 - hunting.cooldown / (hunting.weapon === 'bow' ? .45 : hunting.weapon === 'axe' ? .62 : .43)) * 100}%`;
+  $('cooldown-fill').style.width = `${Math.max(0, 1 - (hunting.weapon === 'bow' ? hunting.cooldown / .45 : hunting.meleeCooldown / hunting.meleeInterval)) * 100}%`;
   const charge = Math.round(hunting.charge * 100);
   $('bow-charge').hidden = !hunting.drawing || paused;
   $('bow-charge').classList.toggle('ready', charge === 100);
@@ -513,7 +513,7 @@ if (modelContext?.registerTool) {
     warrior: warrior.state(),
     forestry: forestry.state(player),
     combat: { criticalHits: hunting.criticalHits, lastHit: hunting.lastHit ? { ...hunting.lastHit } : null,
-      autoMelee: { enabled:hunting.weapon!=='bow',...hunting.autoMelee,attacking:!!(hunting.autoAttackRecovery&&(warrior.active?.id==='slash'||hunting.swing>0)) } },
+      autoMelee: { enabled:hunting.weapon!=='bow',...hunting.autoMelee,intervalSeconds:hunting.meleeInterval,cooldown:+hunting.meleeCooldown.toFixed(3),attacking:!!(hunting.autoAttackRecovery&&(warrior.active?.id==='slash'||hunting.swing>0)) } },
     creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,offBalanceSeconds:+e.offBalance.toFixed(2),knockback:e.knockback?{power:e.knockback.id,progress:+(e.knockback.elapsed/e.knockback.duration).toFixed(2)}:null,lastPush:e.lastPush?{...e.lastPush,travelled:+e.lastPush.travelled.toFixed(2)}:null,position:{x:+e.x.toFixed(2),y:+(e.y+e.hop).toFixed(2),z:+e.z.toFixed(2)}})),
   });
   const validateEmpty = value => {
