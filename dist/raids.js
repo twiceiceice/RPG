@@ -76,7 +76,7 @@ export class Raids {
   hitAlly(target,amount,context={}){
     if(target.id==='player'){
       const hit=this.combat.damagePlayer(amount);
-      if(hit&&context.stagger&&this.combat.hp>0){this.combat.tactics.stagger=Math.max(this.combat.tactics.stagger,context.stagger);this.combat.warrior.cancel();this.combat.cancelDraw();}
+      if(hit&&context.stagger&&this.combat.hp>0){this.combat.tactics.stagger=Math.max(this.combat.tactics.stagger,context.stagger);this.combat.warrior.interrupt(context.stagger>=.65);this.combat.cancelDraw();}
       return hit;
     }
     if(!target.alive)return false;

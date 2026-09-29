@@ -157,7 +157,7 @@ export class Hunting {
     this.autoMelee.targetId=null;
     const w=this.warrior;
     if(this.tactics.busy || this.village?.isSafe(player) || this.hp<=0 || !player.grounded || !['axe','sword'].includes(this.weapon)
-      || w.active || w.planted || w.queued || (w.combo.step>0 && w.combo.remaining>0))return false;
+      || w.active || w.followup || w.queued || (w.combo.step>0 && w.combo.remaining>0))return false;
     const range=this.weapon==='axe'?2.7:2.6;
     let target=null,nearest=Infinity;
     // Only creatures initiate auto attack; passing a tree never starts logging.
@@ -208,7 +208,7 @@ export class Hunting {
     this.inSanctuary=!!this.village?.isSafe(player);
     if(this.inSanctuary){
       this.cancelDraw();
-      if(this.warrior.active||this.warrior.planted||this.warrior.queued){this.warrior.cancel();player.vx=player.vz=0;}
+      if(this.warrior.active||this.warrior.followup||this.warrior.queued||this.warrior.combo.step){this.warrior.cancel();player.vx=player.vz=0;}
       this.swing=0;this.autoMelee.targetId=null;
     }
     this.time+=dt;this.cooldown=Math.max(0,this.cooldown-dt);this.swing=Math.max(0,this.swing-dt);this.release=Math.max(0,this.release-dt);

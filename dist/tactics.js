@@ -20,7 +20,7 @@ export class Tactics {
     if(id==='evade'){
       const length=Math.hypot(direction.x,direction.z)||1;
       this.dodge={elapsed:0,dx:direction.x/length,dz:direction.z/length};
-      this.combat.warrior.cancel();this.combat.cancelDraw();this.combat.swing=0;this.combat.autoMelee.targetId=null;
+      this.combat.warrior.interrupt();this.combat.cancelDraw();this.combat.swing=0;this.combat.autoMelee.targetId=null;
       player.vx=player.vz=0;player.jumpBuffer=0;
     }else this.battlecry=BATTLE.battlecry.duration;
     this.combat.events.push({type:id,x:player.x,y:player.y,z:player.z});
@@ -30,7 +30,7 @@ export class Tactics {
   update(dt){
     for(const id in this.cooldowns)this.cooldowns[id]=Math.max(0,this.cooldowns[id]-dt);
     this.battlecry=Math.max(0,this.battlecry-dt);this.stagger=Math.max(0,this.stagger-dt);
-    if(this.dodge){this.dodge.elapsed+=dt;if(this.dodge.elapsed>=BATTLE.evade.duration)this.dodge=null;}
+    if(this.dodge){this.dodge.elapsed+=dt;if(this.dodge.elapsed>=BATTLE.evade.duration){this.dodge=null;this.combat.warrior.finishDodge();}}
     if(this.combat.hp<=0){this.dodge=null;this.battlecry=0;this.stagger=0;}
   }
   state(){return {evading:!!this.dodge,invulnerable:this.invulnerable,stagger:+this.stagger.toFixed(2),battlecry:+this.battlecry.toFixed(2),cooldowns:Object.fromEntries(Object.entries(this.cooldowns).map(([k,v])=>[k,+v.toFixed(2)])),executions:{...this.executions},dodged:this.dodged};}

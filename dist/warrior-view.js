@@ -1,5 +1,5 @@
 import * as THREE from './vendor/three.module.js';
-import { SPIN } from './warrior.js';
+import { SPIN, warriorMotionTime } from './warrior.js';
 
 const Y = new THREE.Vector3(0, 1, 0), v = new THREE.Vector3(), midpoint = new THREE.Vector3();
 const ease = t => { t = THREE.MathUtils.clamp(t, 0, 1); return t * t * (3 - 2 * t); };
@@ -102,7 +102,7 @@ export class WarriorView {
     this.armor.visible = equipped; this.rig.visible = equipped && !firstPerson; this.firstRig.visible = equipped && firstPerson;
     if (equipped) {
       avatar.arms.forEach(arm=>{arm.visible=false;});
-      const a = w.active, id = a?.id, t = a ? a.elapsed/a.duration : 0, elapsed = a?.elapsed ?? 0;
+      const a = w.active, id = a?.id, t = a ? a.elapsed/a.duration : 0, elapsed = warriorMotionTime(a);
       const angle = avatar.root.rotation.y, facing = w.facing(), dx = facing?.x ?? Math.sin(angle), dz = facing?.z ?? Math.cos(angle);
       const idle = () => this.placeLocal(player,dx,dz,-.20,.64,.30,.17,0,-.42,.20);
       idle();
@@ -117,7 +117,8 @@ export class WarriorView {
         avatar.body.position.y -= strike*.20; avatar.body.rotation.x = -.12*wind+.34*strike;
         avatar.legs.forEach((leg,i)=>{leg.rotation.x=(i?-.28:.16)*strike;});
       } else if (id === 'kick') {
-        this.placePlanted(a.anchor);
+        if (a.carriedAxe) this.placeLocal(player,dx,dz,-.32,.85,-.15,-.45,0,-.50);
+        else this.placePlanted(a.anchor);
         flight = ease((elapsed-.12)/.15)*(1-ease((elapsed-.70)/.27));
         const crouch=Math.sin(Math.min(1,elapsed/.14)*Math.PI)*.16;
         avatar.body.position.y = -crouch+.09*flight;
@@ -131,7 +132,7 @@ export class WarriorView {
         // Extend both hands away from the chest and whip the blade through the front
         // at the damage frame, then carry the torso into a pronounced follow-through.
         this.placeLocal(player,dx,dz,mix(Math.sin(arc)*.48,-.2,recover),mix(.95+drive*.16,.64,recover),mix(.18+Math.cos(arc)*.32,.30,recover),mix(Math.PI/2,.17,recover),mix(arc,0,recover),mix(0,-.42,recover),.20*recover);
-        if (elapsed < .74) {
+        if (elapsed < .74 && a.anchor) {
           // Bring the axe to the warrior so the combo keeps its forward momentum.
           this.blendPosition.copy(this.axe.position); this.blendRotation.copy(this.axe.quaternion);
           this.placePlanted(a.anchor,Math.sin(recall*Math.PI)*.60);
@@ -161,10 +162,10 @@ export class WarriorView {
       for (const arm of this.arms) {
         arm.shoulder.set(arm.side*.38,1.42,0); avatar.body.localToWorld(arm.shoulder);
         const restingGrip=arm.side<0?.72:.35;
-        const grip = id === 'kick' ? arm.side<0?.08:.28 : restingGrip;
+        const grip = id === 'kick' && !a.carriedAxe ? arm.side<0?.08:.28 : restingGrip;
         arm.end.set(0,grip,0); this.axe.localToWorld(arm.end);
         // Release the planted handle after takeoff; do not stretch arms back to it.
-        let free = id==='kick' ? ease((elapsed-.16)/.12) : 0;
+        let free = id==='kick' && !a.carriedAxe ? ease((elapsed-.16)/.12) : 0;
         if ((id==='sweep'&&elapsed<.74)||(!a&&w.planted?.kicked)) free=ease((arm.end.distanceTo(arm.shoulder)-.85)/.50);
         if (free>0) {
           this.handPoint.set(arm.side*.48,1.08,-.18);avatar.body.localToWorld(this.handPoint);arm.end.lerp(this.handPoint,free);
@@ -174,7 +175,7 @@ export class WarriorView {
         segment(arm.upper,arm.shoulder,arm.elbow); segment(arm.fore,arm.elbow,arm.end);
         arm.hand.position.copy(arm.end); arm.hand.quaternion.copy(this.axe.quaternion);
       }
-      this.firstAxe.visible=!(id==='kick'&&elapsed>.23)&&!(id==='sweep'&&elapsed<.52)&&!(!a&&w.planted?.kicked);
+      this.firstAxe.visible=!(id==='kick'&&!a.carriedAxe&&elapsed>.23)&&!(id==='sweep'&&a.anchor&&elapsed<.52)&&!(!a&&w.planted?.kicked);
       this.firstAxe.scale.setScalar(.67); this.firstAxe.position.set(.25,-.68,-1.28);
       this.camera.getWorldQuaternion(this.cameraRotation);this.firstAxe.quaternion.copy(this.cameraRotation.invert()).multiply(this.axe.quaternion);
       if (id==='slam') this.firstAxe.position.set(.25*(1-ease(elapsed/.43)),-.68+ease(elapsed/.43)*.27,-1.34);
@@ -195,9 +196,9 @@ export class WarriorView {
       this.trail.material.color.setHex(color);
     } else this.trail.material.color.setHex(0xffdb8b);
     const sweep=w.active?.id==='sweep'?w.active:null;
-    this.sweepVfx.visible=equipped&&!!sweep&&sweep.elapsed>.90&&sweep.elapsed<1.46;
+    this.sweepVfx.visible=equipped&&!!sweep&&warriorMotionTime(sweep)>.90&&warriorMotionTime(sweep)<1.46;
     if(this.sweepVfx.visible) {
-      const elapsed=sweep.elapsed,cut=.5*ease((elapsed-.90)/.16)+.5*ease((elapsed-1.06)/.17);
+      const elapsed=warriorMotionTime(sweep),cut=.5*ease((elapsed-.90)/.16)+.5*ease((elapsed-1.06)/.17);
       const fade=ease((elapsed-.90)/.06)*(1-ease((elapsed-1.23)/.23));
       this.sweepVfx.position.set(player.x,player.y+.96,player.z);
       this.sweepVfx.rotation.set(-Math.PI/2,0,Math.atan2(-sweep.dz,sweep.dx));
@@ -214,7 +215,7 @@ export class WarriorView {
     this.effects=this.effects.filter(e=>e.life>0);
   }
   updateTrail(dt,paused,firstPerson,equipped) {
-    const a=this.warrior.active,elapsed=a?.elapsed??0;
+    const a=this.warrior.active,elapsed=warriorMotionTime(a);
     if(!paused){
       this.trailSamples=this.trailSamples.filter(s=>(s.life-=dt)>0);
       if(equipped&&(a?.id==='spin'||(a?.id==='slam'&&elapsed>.43&&elapsed<.69)||(a?.id==='sweep'&&elapsed>.90&&elapsed<1.30)||(a?.id==='slash'&&elapsed>.14&&elapsed<.42))){

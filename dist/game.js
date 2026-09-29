@@ -3,7 +3,7 @@ import { Movement, terrainHeight } from './movement.js';
 import { createEnvironment, createAvatar } from './environment.js';
 import { Hunting } from './combat.js';
 import { HuntingView } from './hunting-view.js';
-import { WARRIOR_SKILLS } from './warrior.js';
+import { WARRIOR_SKILLS, warriorMotionTime } from './warrior.js';
 import { WarriorView } from './warrior-view.js';
 import { ForestryView } from './forestry-view.js';
 import { Village } from './village.js';
@@ -59,6 +59,7 @@ const battleAura=new THREE.Mesh(new THREE.RingGeometry(.8,1,48),new THREE.MeshBa
 const coarsePointer = matchMedia('(pointer:coarse)').matches;
 const keys = new Set();
 let started = false, paused = true, locked = false, firstPerson = false;
+let releasingMouse = false, requestingMouse = false;
 let yaw = .16, pitch = .29, cameraDistance = 7.4, phase = 0, previousTime = 0, accumulator = 0;
 let touchX = 0, touchZ = 0, touchSprint = false, dragging = null, toastTimer;
 let drawOwner = null, mouseDrawPosition = null, touchDrawPointer = null;
@@ -152,16 +153,24 @@ function setPaused(value) {
   paused = value; clearInput(); accumulator = 0;
   $('resume').hidden = !value || !started || menuOpen() || hunting.hp <= 0;
   audio.setPlaying(!value&&started);
-  if (value && document.pointerLockElement) document.exitPointerLock();
+  if (value && document.pointerLockElement) { releasingMouse = true; document.exitPointerLock(); }
 }
 async function lockMouse() {
-  if (coarsePointer || document.pointerLockElement) return;
+  if (coarsePointer || document.pointerLockElement || requestingMouse || paused || menuOpen()) return;
+  requestingMouse = true;
   try {
     if (!renderer.domElement.requestPointerLock) throw new Error('unsupported');
     await renderer.domElement.requestPointerLock();
   } catch {
     notify('우클릭 드래그로 시점 회전 · 1~4 연계 · 5 궁극기 · 좌클릭 기본 공격');
-  }
+  } finally { requestingMouse = false; }
+}
+function resumeFromMenu() {
+  if (!started || hunting.hp <= 0 || document.hidden || !document.hasFocus() || menuOpen()) return;
+  setPaused(false); updateHUD(); world.focus({preventScroll:true}); void lockMouse();
+}
+function closeMenu(id) {
+  $(id).close(); resumeFromMenu();
 }
 function play() {
   void audio.unlock();
@@ -237,7 +246,7 @@ function travelToVillage() {
   hunting.inSanctuary=true;hunting.autoMelee.targetId=null;hunting.swing=0;impactPause=0;
   started=true;setPaused(false);$('welcome').hidden=true;$('crosshair').hidden=false;
   yaw=-.42;pitch=.34;cameraDistance=9;avatar.root.rotation.y=Math.PI-.42;
-  updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});
+  updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});void lockMouse();
   notify('솔바람 마을 · 가까운 주민에게 E로 대화해 보세요.');return {accepted:true};
 }
 function usePotion() {
@@ -261,7 +270,7 @@ function startBattle(mode){
   if(buildingMode)toggleBuild(false);
   started=true;$('welcome').hidden=true;$('crosshair').hidden=false;$('battle-dialog').close();setPaused(false);
   yaw=Math.PI/2;pitch=.34;cameraDistance=10;avatar.root.rotation.y=-Math.PI/2;impactPause=0;
-  updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});return result;
+  updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});void lockMouse();return result;
 }
 function rallyResidents(){
   const result=!started||paused?{accepted:false,reason:'플레이를 이어 가 주세요.'}:raids.toggleOrder();notify(result.message??result.reason);updateHUD();return result;
@@ -336,9 +345,13 @@ function releaseBowDraw(owner) {
 }
 const unlockAudio=()=>{if(!audio.context||audio.context.state==='suspended')void audio.unlock();};
 document.addEventListener('pointerdown',unlockAudio,{capture:true});document.addEventListener('keydown',unlockAudio,{capture:true});
-$('talents-button').addEventListener('click',openTalents);$('close-talents').addEventListener('click',()=>$('talents-dialog').close());$('reset-talents').addEventListener('click',resetTalents);
-$('audio-button').addEventListener('click',openAudio);$('close-audio').addEventListener('click',()=>$('audio-dialog').close());
-for(const id of ['talents-dialog','audio-dialog'])$(id).addEventListener('close',()=>{setPaused(!started||document.hidden||!document.hasFocus()||menuOpen());updateHUD();world.focus({preventScroll:true});});
+$('talents-button').addEventListener('click',openTalents);$('close-talents').addEventListener('click',()=>closeMenu('talents-dialog'));$('reset-talents').addEventListener('click',resetTalents);
+$('audio-button').addEventListener('click',openAudio);$('close-audio').addEventListener('click',()=>closeMenu('audio-dialog'));
+for(const id of ['talents-dialog','audio-dialog','battle-dialog','trade-dialog','help-dialog']) {
+  // Escape releases the mouse intentionally; closing with the button resumes in that gesture.
+  $(id).addEventListener('cancel',()=>setPaused(true));
+  $(id).addEventListener('close',()=>{if(id==='trade-dialog')talkingTo=null;$('resume').hidden=!paused||!started||menuOpen()||hunting.hp<=0;updateHUD();world.focus({preventScroll:true});});
+}
 $('audio-enabled').addEventListener('change',()=>{audio.set('enabled',$('audio-enabled').checked);renderAudio();});
 for(const key of ['music','effects'])$(key+'-volume').addEventListener('input',()=>{audio.set(key,Number($(key+'-volume').value)/100);renderAudio();});
 $('build-button').addEventListener('click',()=>toggleBuild());$('build-close').addEventListener('click',()=>toggleBuild(false));$('plot-travel').addEventListener('click',()=>travelToPlot());
@@ -355,28 +368,27 @@ $('play-button').addEventListener('click', play);
 $('village-button').addEventListener('click',travelToVillage);
 $('village-start').addEventListener('click',travelToVillage);
 $('battle-button').addEventListener('click',openBattle);
-$('close-battle').addEventListener('click',()=>$('battle-dialog').close());
-$('battle-dialog').addEventListener('close',()=>{setPaused(document.hidden||!document.hasFocus());updateHUD();world.focus({preventScroll:true});});
+$('close-battle').addEventListener('click',()=>closeMenu('battle-dialog'));
 for(const mode of ['defense','assault'])$('start-'+mode).addEventListener('click',()=>startBattle(mode));
 $('rally-button').addEventListener('click',()=>{rallyResidents();world.focus({preventScroll:true});});
 $('retreat-button').addEventListener('click',()=>{raids.abort();$('battle-dialog').close();hunting.sinceHit=100;hunting.warrior.cancel();travelToVillage();});
 $('potion-button').addEventListener('click',()=>{usePotion();world.focus({preventScroll:true});});
 $('interact-prompt').addEventListener('click',()=>openResident());
-$('close-trade').addEventListener('click',()=>$('trade-dialog').close());
+$('close-trade').addEventListener('click',()=>closeMenu('trade-dialog'));
 for(const category of ['buy','sell','barter'])$('trade-'+category).addEventListener('click',()=>{tradeCategory=category;renderTrade();});
-$('trade-dialog').addEventListener('close',()=>{talkingTo=null;setPaused(document.hidden||!document.hasFocus());updateHUD();world.focus({preventScroll:true});});
 $('resume-button').addEventListener('click', play);
 $('view-button').addEventListener('click', () => { setView(firstPerson ? 'third' : 'first'); world.focus(); });
 $('reset-button').addEventListener('click', resetPosition);
 $('help-button').addEventListener('click', () => {
   $('help-dialog').showModal(); setPaused(true);
 });
-$('close-help').addEventListener('click', () => $('help-dialog').close());
-$('help-dialog').addEventListener('close', () => { $('resume').hidden = !started || hunting.hp <= 0; });
+$('close-help').addEventListener('click', () => closeMenu('help-dialog'));
 document.addEventListener('pointerlockchange', () => {
   const wasLocked = locked; locked = document.pointerLockElement === renderer.domElement;
+  const intentionalRelease = releasingMouse; releasingMouse = false;
   document.querySelector('.mouse-guide').textContent = locked ? '마우스 시점 · Esc 쉬기' : '우클릭 드래그 · 시점';
-  if (wasLocked && !locked) setPaused(true);
+  if (locked && paused) { releasingMouse=true; document.exitPointerLock(); }
+  else if (wasLocked && !locked && !intentionalRelease) setPaused(true);
 });
 document.addEventListener('pointerlockerror', () => {
   if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~4 연계 · 5 궁극기');
@@ -385,7 +397,7 @@ document.addEventListener('keydown', event => {
   if (menuOpen()) return;
   // Let focused controls keep their native Enter/Space/arrow behavior.
   if(event.target.closest?.('button,input,select,textarea')&&['Enter','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code))return;
-  if (event.code === 'Escape') { if (started && !locked && hunting.hp > 0) setPaused(!paused); return; }
+  if (event.code === 'Escape') { if (started && !locked && hunting.hp > 0) { if(paused)play();else setPaused(true); } return; }
   if (event.code === 'Enter' && !started) { event.preventDefault();play(); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   if (event.repeat) return;
@@ -576,7 +588,7 @@ function updateWarriorHUD() {
   if(nearbyOpening)$('critical-opening').textContent=`✦ ${nearbyOpening.kind==='tree'?'금이 간 나무':'비틀거리는 적'} · 다음 적중은 치명타 ×${hunting.criticalMultiplier}`;
   const a = warrior.active;
   const progress = a ? a.elapsed / a.duration : 0;
-  const elapsed = a?.elapsed ?? 0;
+  const elapsed = warriorMotionTime(a);
   const phaseLabels = {
     charge: '돌파', slam: elapsed < .43 ? '날 세우기' : elapsed < .64 ? '내려찍기' : '도끼 고정',
     kick: elapsed < .14 ? '도약' : elapsed < .70 ? '날아차기' : '착지',
@@ -589,12 +601,12 @@ function updateWarriorHUD() {
   $('ultimate-charge').value = spinning ? a.duration-elapsed : ready ? 4 : combo.step;
   $('ultimate-charge').setAttribute('aria-label', spinning ? '회전베기 남은 시간' : '궁극기 연계 진행');
   $('ultimate-status').textContent = spinning ? `${a.stage}단계 ${a.stage===2?'흡입 회전':'회전베기'} · ${(a.duration-elapsed).toFixed(1)}초${a.extended>0?` · +${a.extended.toFixed(2)}초`:''}`
-    : ready ? '궁극기 준비 완료 · 5 회전베기' : combo.step ? `연계 ${combo.step}/4 적중 · 다음 ${combo.step+1}${combo.remaining>0?` · ${combo.remaining.toFixed(1)}초`:''}`
+    : ready ? '궁극기 준비 완료 · 5 회전베기' : combo.step ? `연계 ${combo.step}/4 적중 · 다음 ${combo.step+1}${hunting.tactics.busy?' · 연계 시간 보존':combo.remaining>0?` · ${combo.remaining.toFixed(1)}초`:''}`
     : combo.failure ? `${combo.failure} · 1번부터 다시` : '궁극기 연계 · 1 → 2 → 3 → 4 적중';
   for (const skill of WARRIOR_SKILLS) {
     const button = $('skill-' + skill.id), remaining = warrior.cooldowns[skill.id];
-    const needsAxe = ['kick','sweep'].includes(skill.id) && !warrior.planted;
-    const usedKick = skill.id === 'kick' && warrior.planted?.kicked;
+    const needsAxe = ['kick','sweep'].includes(skill.id) && !warrior.followup;
+    const usedKick = skill.id === 'kick' && warrior.followup?.kicked;
     const recoverFirst = ['charge','slam'].includes(skill.id) && warrior.planted;
     const active = a?.id === skill.id, queued = warrior.queued?.id === skill.id;
     button.classList.toggle('active', active); button.classList.toggle('queued', queued);
@@ -608,7 +620,8 @@ function updateWarriorHUD() {
   $('combo-hint').textContent = warrior.queued ? `${WARRIOR_SKILLS.find(s=>s.id===warrior.queued.id).name} 예약됨${['kick','sweep'].includes(warrior.queued.id)?' · 발동 전 시점으로 방향 선택':''}`
     : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '현재 위치에서 도끼를 끌어오기' : elapsed < .90 ? '낮게 버티고 크게 몸 틀기' : '온몸으로 휘두르는 넓은 가로베기', slash: a.automatic ? '근접 자동 공격 · 기술 입력이 우선해요' : '기본 공격 중', spin: a.stage===2 ? `끌어당기는 중 · 연속 ${a.streak}/3 · 다음 치명타까지 ${3-a.streak}회` : `연속 ${a.streak}/3 적중 → 흡입 강화 · WASD 이동` }[a.id]
     : warrior.planted ? `${warrior.planted.kicked ? '4 가로베기' : '3 날아차기 → 4 가로베기'} · 시점으로 방향 선택 · ${warrior.planted.remaining.toFixed(1)}초`
-    : '1 돌진 → 2 내려찍기 → 3 날아차기 → 4 가로베기';
+    : warrior.carried ? `${warrior.carried.kicked ? '4 가로베기' : '3 도끼를 들고 날아차기'} · 연계 계속 · ${warrior.carried.remaining.toFixed(1)}초`
+    : '1 → 2 → 3 → 4 · F 회피 중에도 다음 기술 예약';
   $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / (3.4+progression.bonuses.combo) * 100 : 0}%`;
 }
 function updateHUD() {
@@ -764,6 +777,7 @@ if (modelContext?.registerTool) {
   const state = () => ({
     position: { x: +player.x.toFixed(3), y: +player.y.toFixed(3), z: +player.z.toFixed(3) },
     grounded: player.grounded, view: firstPerson ? 'first' : 'third',
+    camera: {yaw:+yaw.toFixed(4),pitch:+pitch.toFixed(4),mouseLocked:locked},
     paused, started, health: Math.ceil(hunting.hp), maxHealth:hunting.maxHp, weapon: hunting.weapon, kills: { ...hunting.kills },
     progression:progression.state(),audio:audio.state(),building:{enabled:buildingMode,material:buildMaterial,...building.state(),candidate:buildingView.candidate,placementReason:buildingView.reason??null},
     bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
@@ -779,7 +793,7 @@ if (modelContext?.registerTool) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
   };
   const tools = [
-    {name:'use_tactical_skill',title:'회피 또는 전투 함성',description:'Use the visible F dodge or 6 battle cry. Dodge follows held movement or the camera direction, cancels the current attack, keeps an already prepared ultimate, and has a four-second cooldown. Battle cry lasts six seconds with +35% outgoing and -25% incoming damage; cooldown thirty seconds. Paused play and build mode reject both. Direction matches WASD relative to the camera.',inputSchema:{type:'object',properties:{skill:{type:'string',enum:['evade','battlecry']},direction:{type:'string',enum:['movement','forward','back','left','right']}},required:['skill'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||!['evade','battlecry'].includes(input.skill)||Object.keys(input).some(k=>!['skill','direction'].includes(k))||(input.direction&&!['movement','forward','back','left','right'].includes(input.direction)))throw new Error('Choose evade or battlecry and a movement direction.');const r=useTactic(input.skill,input.direction);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'use_tactical_skill',title:'회피 또는 전투 함성',description:'Use the visible F dodge or 6 battle cry. Dodge follows held movement or the camera direction, cancels the current animation but preserves landed combo steps and a prepared ultimate, pauses the combo timer with at least two seconds after landing, allows one queued skill, and has a four-second cooldown. Battle cry lasts six seconds with +35% outgoing and -25% incoming damage; cooldown thirty seconds. Paused play and build mode reject both. Direction matches WASD relative to the camera.',inputSchema:{type:'object',properties:{skill:{type:'string',enum:['evade','battlecry']},direction:{type:'string',enum:['movement','forward','back','left','right']}},required:['skill'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||!['evade','battlecry'].includes(input.skill)||Object.keys(input).some(k=>!['skill','direction'].includes(k))||(input.direction&&!['movement','forward','back','left','right'].includes(input.direction)))throw new Error('Choose evade or battlecry and a movement direction.');const r=useTactic(input.skill,input.direction);if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'open_talents',title:'전사 특성 열기',description:'Open the same P talent tree visible in the game. Pauses play.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=openTalents();if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'learn_talent',title:'특성 배우기',description:'Spend one earned point in the open talent tree. Uses the same level, prerequisite and combat restrictions as the visible buttons.',inputSchema:{type:'object',properties:{talent:{type:'string',enum:TALENTS.map(t=>t.id)}},required:['talent'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!$('talents-dialog').open||!input||Object.keys(input).some(k=>k!=='talent'))throw new Error('Open the talent tree first.');const r=learnTalent(input.talent);if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'set_build_mode',title:'건축 모드 전환',description:'Use the same K build mode. Only available in the peaceful village after play begins.',inputSchema:{type:'object',properties:{enabled:{type:'boolean'}},required:['enabled'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||typeof input.enabled!=='boolean'||Object.keys(input).some(k=>k!=='enabled'))throw new Error('Choose enabled.');const r=toggleBuild(input.enabled);if(!r.accepted)throw new Error(r.reason);return state();}},
@@ -822,7 +836,7 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip a ready axe or sword and resume play. Recover a planted axe with skill 4. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
-    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill: 1 charge, 2 slam, 3 kick, 4 sweep, 5 spin ultimate. Kick and sweep need the planted axe and lock their travel and hit direction to the current camera heading when each skill actually starts, including queued follow-ups. Turning during the previous skill redirects only the next kick or sweep; charge and slam keep their existing direction rules. The planted axe stays at its original world anchor. Kick leaps forward, rolling light/medium/strong PRD power: 18/26/36 damage, 3/4.5/6m knockback. Targets become off balance for one double-damage hit within 4 seconds. Sweep recalls the axe without retreating and lunges forward. Landing charge, slam, kick, sweep in order stores one spin. Misses, wrong order, weapon switching, axe retrieval, or waiting over 3 seconds after a skill ends break an unfinished combo. Rejected inputs and ordinary damage do not; dodging or a heavy skill stagger cancels an unfinished combo, while a prepared ultimate stays stored. Spin lasts 2.5s, hits all directions every .25s, and allows movement. Every third consecutive connected pulse is 2x critical; the first such pulse upgrades to stage 2, pulling nearby visible enemies inward. A missed pulse resets the streak. Critical pulses add .25s once each, kills add .5s each, total duration caps at 4s. No damage or pull through walls. Trees also accept the same attacks, combo and spin hits. Kick cracks trees for the next critical without moving them; stage 2 pulls dropped wood. Felling a tree gives the same spin duration bonus as a defeat. One valid follow-up may be queued. Returns actual state; actions advance in real time.',
+    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill: 1 charge, 2 slam, 3 kick, 4 sweep, 5 spin ultimate. Kick and sweep need the planted axe or a follow-up carried through dodge/brief stagger and lock their travel and hit direction to the current camera heading when each skill actually starts, including queued follow-ups. Turning during the previous skill redirects only the next kick or sweep; charge and slam keep their existing direction rules. The planted axe stays at its original world anchor. Kick leaps forward, rolling light/medium/strong PRD power: 18/26/36 damage, 3/4.5/6m knockback. Targets become off balance for one double-damage hit within 4 seconds. Sweep recalls the axe without retreating and lunges forward. Landing charge, slam, kick, sweep in order stores one spin. Misses, wrong order, weapon switching, axe retrieval, or waiting over 3 seconds after a skill ends break an unfinished combo. Rejected inputs and ordinary damage do not; dodge or brief stagger preserves landed steps, freezes the timer during the interruption, and allows one buffered skill. Dodge grants at least two seconds afterward. The axe is retrieved and a held-axe kick can continue the chain. Cancelling before impact permits a retry; misses never earn credit. Heavy stagger of at least .65 seconds cancels an unfinished combo, while a prepared ultimate stays stored. The four player animations total 3.2 seconds; enemy warning times are unchanged. Spin lasts 2.5s, hits all directions every .25s, and allows movement. Every third consecutive connected pulse is 2x critical; the first such pulse upgrades to stage 2, pulling nearby visible enemies inward. A missed pulse resets the streak. Critical pulses add .25s once each, kills add .5s each, total duration caps at 4s. No damage or pull through walls. Trees also accept the same attacks, combo and spin hits. Kick cracks trees for the next critical without moving them; stage 2 pulls dropped wood. Felling a tree gives the same spin duration bonus as a defeat. One valid follow-up may be queued. Returns actual state; actions advance in real time.',
       inputSchema: { type: 'object', properties: { skill: { type: 'string', enum: ['charge','slam','kick','sweep','spin'] } }, required: ['skill'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {

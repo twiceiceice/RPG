@@ -12,7 +12,7 @@ function tickAction(s,u,seconds,friendly=false){for(let t=0;t<seconds-1e-8;t+=1/
 test('dodge cancels an attack, retains a banked ultimate, has a bounded invulnerability window and cooldown',()=>{
   const s=setup();s.h.warrior.start('slam',s.p,{x:0,z:1});s.h.warrior.ultimate.ready=true;s.h.meleeCooldown=1.5;
   assert.ok(s.h.tactics.request('evade',s.p,{x:1,z:0}).accepted);assert.equal(s.h.warrior.active,null);assert.equal(s.h.warrior.ultimate.ready,true);assert.equal(s.h.meleeCooldown,1.5);
-  assert.equal(s.h.damagePlayer(40),false);assert.equal(s.h.hp,100);assert.equal(s.h.attack(s.p,{x:1,z:0}),false);assert.equal(s.h.warrior.request('charge',s.p,{x:1,z:0}).accepted,false);
+  assert.equal(s.h.damagePlayer(40),false);assert.equal(s.h.hp,100);assert.equal(s.h.attack(s.p,{x:1,z:0}),false);assert.equal(s.h.warrior.request('charge',s.p,{x:1,z:0}).queued,true);assert.equal(s.h.warrior.active,null);
   s.h.tactics.update(.3);assert.equal(s.h.tactics.invulnerable,false);assert.ok(s.h.damagePlayer(20));assert.equal(s.h.hp,80);assert.equal(s.h.tactics.request('evade',s.p,{x:1,z:0}).accepted,false);
   s.h.tactics.update(4);assert.ok(s.h.tactics.request('evade',s.p,{x:1,z:0}).accepted);s.h.hp=0;s.h.tactics.update(.01);assert.equal(s.h.tactics.dodge,null);
 });
