@@ -190,8 +190,8 @@ export class WarriorView {
     if (spin) {
       this.spinVfx.position.set(player.x,player.y,player.z);this.spinVfx.rotation.y=spin.elapsed*Math.PI*4;
       const fade=Math.min(1,spin.elapsed/.12,(spin.duration-spin.elapsed)/.15), color=spin.stage===2?0x88f5e2:0xffd782;
-      this.spinRings.forEach((ring,i)=>{ring.rotation.z=i*2.1-spin.elapsed*(i+1);ring.material.color.setHex(color);ring.material.opacity=fade*(.25+i*.055);});
-      this.windLines.forEach(line=>{line.visible=spin.stage===2;line.material.opacity=fade*.55;});
+      this.spinRings.forEach((ring,i)=>{ring.scale.setScalar(1+(w.combat.progression?.bonuses.spinRadius??0)/SPIN.radius);ring.rotation.z=i*2.1-spin.elapsed*(i+1);ring.material.color.setHex(color);ring.material.opacity=fade*(.25+i*.055);});
+      this.windLines.forEach(line=>{const scale=1+(w.combat.progression?.bonuses.pullRadius??0)/SPIN.pullRadius;line.scale.set(scale,1,scale);line.visible=spin.stage===2;line.material.opacity=fade*.55;});
       this.trail.material.color.setHex(color);
     } else this.trail.material.color.setHex(0xffdb8b);
     const sweep=w.active?.id==='sweep'?w.active:null;

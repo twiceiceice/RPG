@@ -30,11 +30,11 @@ export class Raids {
     this.combat.cancelDraw();this.combat.inSanctuary=false;this.combat.autoMelee.targetId=null;
     const participants=this.village.residents.filter(n=>mode==='defense'||EXPEDITION.includes(n.id));
     this.allies=participants.map((n,i)=>{
-      const stats=ALLY_ROLES[n.id],x=mode==='defense'?stats.spot[0]:spot.x+1.6+(i%2)*1.4,z=mode==='defense'?stats.spot[1]:spot.z+(i%2?2:-2);
+      const stats=ALLY_ROLES[n.id],x=mode==='defense'?stats.spot[0]:spot.x+1.6+Math.floor(i/2)*1.25,z=mode==='defense'?stats.spot[1]:spot.z+(i%2?2:-2);
       Object.assign(n,stats,{x,z,y:terrainHeight(x,z),combatRole:stats.role,battle:true,hp:stats.maxHp,alive:true,flash:0,swing:0,cooldown:i*.25,windup:0,target:null,moving:false,retreating:false,path:[],navClock:0});
       return n;
     });
-    this.combat.events.push({type:'raid-notice',message:mode==='defense'?'습격 경보! 8초 뒤 서쪽에서 적이 와요.':'주민 4명과 출정했어요. 8초 뒤 야영지를 공격합니다.'});
+    this.combat.events.push({type:'raid-notice',message:mode==='defense'?'습격 경보! 주민 10명과 서쪽 문을 지켜요.':`주민 ${participants.length}명과 출정했어요. 8초 뒤 야영지를 공격합니다.`});
     return {accepted:true};
   }
   toggleOrder(){if(!this.active)return {accepted:false,reason:'전투 중에 주민에게 지시할 수 있어요.'};this.order=this.order==='fight'?'rally':'fight';for(const a of this.allies){a.windup=0;a.navClock=0;}return {accepted:true,message:this.order==='rally'?'주민들이 내게 모여요. 가까운 적에게만 대응합니다.':'교전 명령 · 주민들이 주변 적과 싸웁니다.'};}
@@ -53,7 +53,7 @@ export class Raids {
     this.phase='fighting';this.combat.events.push({type:'raid-notice',message:this.mode==='defense'?`${this.wave}/2차 습격 · 서쪽 문을 지켜 주세요!`:'붉은발 대장을 포함한 적 6명을 처치하세요.'});
   }
   visible(a,b){return Math.abs((a.y??0)-(b.y??0))<3&&this.combat.unobstructed({x:a.x,y:(a.y??0)+1,z:a.z},{x:b.x,y:(b.y??0)+1,z:b.z});}
-  playerTarget(player){return {id:'player',...player,hp:this.combat.hp,maxHp:100,alive:this.combat.hp>0};}
+  playerTarget(player){return {id:'player',...player,hp:this.combat.hp,maxHp:this.combat.maxHp,alive:this.combat.hp>0};}
   friendlies(player){return [...this.allies.filter(a=>a.alive),this.playerTarget(player)];}
   hitAlly(target,amount){
     if(target.id==='player')return this.combat.damagePlayer(amount);
@@ -158,7 +158,7 @@ export class Raids {
   finish(won,reason=''){
     if(!this.active)return;
     const mode=this.mode;this.phase=won?'victory':'defeat';const reward=won?(mode==='defense'?{gold:40,timber:10,stone:5,roof:0}:{gold:65,timber:0,stone:10,roof:5}):null;
-    if(reward){this.village.gold=Math.min(999999,this.village.gold+reward.gold);for(const key of ['timber','stone','roof'])this.village.blocks[key]=Math.min(99999,this.village.blocks[key]+reward[key]);this.village.raidWins[mode]++;this.village.save();}
+    if(reward){this.village.gold=Math.min(999999,this.village.gold+reward.gold);for(const key of ['timber','stone','roof'])this.village.blocks[key]=Math.min(99999,this.village.blocks[key]+reward[key]);this.village.raidWins[mode]++;this.combat.progression?.add(mode);this.village.save();}
     this.result={won,mode,reason,reward};this.cleanup();this.combat.warrior.cancel();this.combat.cancelDraw();
     this.combat.events.push({type:'raid-result',message:won?`${mode==='defense'?'마을 방어':'야영지 공격'} 성공! +${reward.gold} 골드 · 건축 자재 획득`:reason+' 주민들은 모두 마을로 돌아왔어요.'});
   }

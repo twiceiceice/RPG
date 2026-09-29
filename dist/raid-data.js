@@ -8,8 +8,11 @@ export const ALLY_ROLES={
   hodu:{role:'궁수',style:'archer',maxHp:100,damage:15,range:9,interval:2.4,spot:[18.2,17.5]},
   nari:{role:'치유',style:'healer',maxHp:90,range:7,interval:3.2,heal:18,spot:[20,13.3]},
   bori:{role:'치유',style:'healer',maxHp:90,range:7,interval:4.5,heal:14,spot:[20,18.2]},
+  daon:{role:'방패병',style:'guard',maxHp:195,damage:15,range:1.9,interval:2.2,spot:[14,18.4]},
+  roan:{role:'전사',style:'melee',maxHp:145,damage:23,range:2,interval:2.3,spot:[15.5,11.6]},
+  lua:{role:'궁수',style:'archer',maxHp:95,damage:16,range:10,interval:2.5,spot:[19,20]},
 };
-export const EXPEDITION=['hari','jun','hodu','nari'];
+export const EXPEDITION=['hari','jun','hodu','nari','daon','roan','lua'];
 export function inCamp(x,z,margin=0){return Math.abs(x-CAMP.x)<CAMP.halfX+margin&&Math.abs(z-CAMP.z)<CAMP.halfZ+margin;}
 export function raidClearance(x,z){return inCamp(x,z,2)||(x>-20&&x<12&&Math.abs(z-15)<4.5);}
 export function campGroundBlend(x,z){const d=Math.max(Math.abs(x-CAMP.x)-CAMP.halfX,Math.abs(z-CAMP.z)-CAMP.halfZ,0)/4;const t=Math.min(1,d);return t*t*(3-2*t);}

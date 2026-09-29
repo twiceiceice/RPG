@@ -1,7 +1,7 @@
 // Units are metres and seconds. Rendering and input are deliberately separate.
 import { villageGroundBlend } from './village-data.js';
 import { campGroundBlend } from './raid-data.js';
-export const WORLD_RADIUS = 70;
+export const WORLD_RADIUS = 82;
 export const PLAYER_RADIUS = 0.34;
 export const PLAYER_HEIGHT = 1.85;
 export function terrainHeight(x, z) {

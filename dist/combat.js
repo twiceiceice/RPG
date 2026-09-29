@@ -51,8 +51,18 @@ export class Hunting {
     if(weapon!==this.weapon)this.warrior.cancel();
     this.cancelDraw();this.weapon=weapon;this.swing=0;this.release=0;this.autoMelee.targetId=null;this.meleeFacing=null;
   }
+  get maxHp(){return this.progression?.bonuses.maxHp??100;}
+  get criticalMultiplier(){return this.progression?.bonuses.critical??2;}
+  talentDamage(entity,damage,context){
+    if(!this.progression||context.source==='ally')return damage;
+    const p=this.progression,b=p.bonuses;damage*=b.damage;
+    if(context.source==='slam')damage*=b.slam;
+    if(context.source==='spin')damage*=b.spin;
+    if(entity.kind!=='tree'&&entity.hp<=entity.maxHp*.3&&p.rank('execute'))damage*=1.25;
+    return Math.max(1,Math.round(damage));
+  }
   restorePlayer() {
-    this.cancelDraw();this.warrior.cancel(true);this.hp=100;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
+    this.cancelDraw();this.warrior.cancel(true);this.hp=this.maxHp;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
     this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.knockback=null;e.lastPush=null;e.hop=0;e.knockX=e.knockZ=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
     this.autoAttackRecovery=false;this.meleeFacing=null;this.autoMelee={targetId:null,attacks:0};
     this.meleeCooldown=0;
@@ -61,14 +71,15 @@ export class Hunting {
   targets() { return this.entities.concat(this.forestry.trees); }
   unobstructed(a,b,ignore=null) { return !this.colliders.some(box=>{if(box===ignore||box.active===false)return false;const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
   damageEntity(e,damage,dx,dz,context={}) {
+    damage=this.talentDamage(e,damage,context);
     if(e.kind==='tree')return this.forestry.damage(e,damage,dx,dz,context);
     if(!e.alive||damage<=0)return;
     const critical=(!context.preserveOpening&&e.offBalance>0)||context.forceCritical===true;
-    if(critical){damage*=2;e.offBalance=0;this.criticalHits++;}
+    if(critical){damage=Math.round(damage*this.criticalMultiplier);e.offBalance=0;this.criticalHits++;}
     e.hp=Math.max(0,e.hp-damage);e.flash=.18;e.knockX=dx*4;e.knockZ=dz*4;
     this.lastHit={targetId:e.id,damage,critical,time:this.time,...context};
     this.events.push({type:'hit',id:e.id,x:e.x,y:e.y+e.height+e.hop,z:e.z,damage,critical,kind:e.kind,...context});
-    if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;if(e.kind in this.kills)this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});this.village?.rewardKill(e);}
+    if(e.hp===0){e.alive=false;e.offBalance=0;e.knockback=null;e.respawn=e.kind==='rabbit'?13:17;if(e.kind in this.kills)this.kills[e.kind]++;this.events.push({type:'defeat',id:e.id,kind:e.kind,x:e.x,y:e.y+.4,z:e.z});this.progression?.add(e.style==='captain'?'captain':e.kind);if(this.hp>0)this.hp=Math.min(this.maxHp,this.hp+(this.progression?.bonuses.healOnKill??0));this.village?.rewardKill(e);}
     return { damage, critical, killed: !e.alive };
   }
   applyOffBalance(e,seconds) {
@@ -162,7 +173,7 @@ export class Hunting {
   }
   damagePlayer(amount) {
     if(this.inSanctuary||this.hp<=0||this.invincible>0)return false;
-    amount=Math.max(1,amount-this.armorLevel*2);
+    const bonuses=this.progression?.bonuses;amount=Math.max(1,Math.round((amount-this.armorLevel*2-(bonuses?.reduction??0))*(1-(bonuses?.mitigation??0))));
     this.hp=Math.max(0,this.hp-amount);this.invincible=.65;this.hurt=.32;this.sinceHit=0;
     this.events.push({type:'hurt',damage:amount});
     if(this.hp===0){this.cancelDraw();this.warrior.cancel(false,true);this.events.push({type:'player-defeat'});}
@@ -195,7 +206,7 @@ export class Hunting {
     for(const e of this.entities)e.offBalance=Math.max(0,e.offBalance-dt);
     this.warrior.update(dt,player);
     this.forestry.update(dt,player);
-    if(this.hp>0&&this.sinceHit>6)this.hp=Math.min(100,this.hp+4*dt);
+    if(this.hp>0&&this.sinceHit>6)this.hp=Math.min(this.maxHp,this.hp+4*dt);
     for(const e of this.entities) {
       e.flash=Math.max(0,e.flash-dt);e.recovery=Math.max(0,e.recovery-dt);
       if(!e.alive){

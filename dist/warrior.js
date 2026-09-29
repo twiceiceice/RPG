@@ -86,6 +86,7 @@ export class Warrior {
     // Keep the axe's world anchor intact while the warrior turns for a follow-up.
     if (this.planted && aimsOnStart(id)) this.planted.facing = { ...facing };
     if (id === 'spin') {
+      this.active.duration+=this.combat.progression?.bonuses.spinDuration??0;
       this.ultimate.ready = false; this.planted = null; this.combo = { step: 0, remaining: 0, failure: null };
       Object.assign(this.active, { stage: 1, nextPulse: SPIN.interval, streak: 0, pulses: 0, hits: 0, criticalPulses: 0, kills: 0, extended: 0 });
       this.ultimate.lastSpin = null;
@@ -121,7 +122,7 @@ export class Warrior {
   }
   updateSpin(dt, player) {
     const a = this.active, combat = this.combat;
-    if (a.stage === 2) for (const e of this.spinTargets(player, SPIN.pullRadius)) {
+    if (a.stage === 2) for (const e of this.spinTargets(player, SPIN.pullRadius+(combat.progression?.bonuses.pullRadius??0))) {
       if(e.kind==='tree')continue;
       const dx=player.x-e.x,dz=player.z-e.z,distance=Math.hypot(dx,dz);
       const travel=Math.min(Math.max(0,distance-1.1),SPIN.pullSpeed*dt);
@@ -131,7 +132,7 @@ export class Warrior {
     }
     while (a.nextPulse <= a.elapsed + 1e-8 && a.nextPulse <= a.duration + 1e-8) {
       a.nextPulse += SPIN.interval; a.pulses++;
-      const targets = this.spinTargets(player, SPIN.radius);
+      const targets = this.spinTargets(player, SPIN.radius+(combat.progression?.bonuses.spinRadius??0));
       if (!targets.length) { a.streak = 0; continue; }
       const guaranteedCritical = a.streak === 2;
       let critical = false, kills = 0;
@@ -147,7 +148,7 @@ export class Warrior {
         a.stage=2; combat.events.push({type:'spin-stage',stage:2});
       }
       if (critical) a.criticalPulses++;
-      const extension = Math.min(SPIN.maxDuration-a.duration,(critical?SPIN.criticalExtension:0)+kills*SPIN.killExtension);
+      const extension = Math.min(SPIN.maxDuration+(combat.progression?.bonuses.spinCap??0)-a.duration,(critical?SPIN.criticalExtension:0)+kills*SPIN.killExtension);
       a.duration += extension; a.extended += extension;
       combat.events.push({type:'spin-pulse',x:player.x,y:player.y,z:player.z,stage:a.stage,critical,extension});
     }
@@ -196,7 +197,7 @@ export class Warrior {
         a.kickPower = this.kickPower.roll();
         this.lastKick = { ...a.kickPower, targetId: e.id, time: combat.time };
       }
-      const context = kick ? { source: 'kick', kickPower: a.kickPower.id, powerName: a.kickPower.name } : {};
+      const context = kick ? { source: 'kick', kickPower: a.kickPower.id, powerName: a.kickPower.name } : {source:a.id};
       a.hitIds.add(e.id); combat.damageEntity(e, kick ? a.kickPower.damage : damage, a.dx, a.dz, context);
       if (offBalance > 0) combat.applyOffBalance(e, offBalance);
       if(e.kind!=='tree'){e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);}
@@ -229,7 +230,7 @@ export class Warrior {
         const hits = this.hitArea(player, { radius: 1.65, damage: 18, cone: .12, stagger: 1.5, offBalance: 4, kick: true });
         if (hits && !a.hit) { a.hit = true; this.impact(player, 'kick', player.x + a.dx, player.z + a.dz); }
       }
-      if (this.planted) { this.planted.kicked = true; this.planted.remaining = 3.4; }
+      if (this.planted) { this.planted.kicked = true; this.planted.remaining = 3.4+(this.combat.progression?.bonuses.combo??0); }
     }
     if (a.id === 'sweep' && a.elapsed >= .74) this.planted = null;
     if (a.id === 'charge' && a.elapsed < .4 && !a.stopped) {
@@ -245,7 +246,7 @@ export class Warrior {
         const origin = { x: player.x, y: player.y + .5, z: player.z };
         while (reach > .2 && !this.combat.unobstructed(origin, { x: player.x + a.dx * (reach+.25), y: player.y + .5, z: player.z + a.dz * (reach+.25) })) reach = Math.max(.2,reach-.15);
         const x = player.x + a.dx * reach, z = player.z + a.dz * reach;
-        this.planted = { x, y: Math.max(player.y, terrainHeight(x, z)), z, dx: a.dx, dz: a.dz, remaining: 3.4, kicked: false };
+        this.planted = { x, y: Math.max(player.y, terrainHeight(x, z)), z, dx: a.dx, dz: a.dz, remaining: 3.4+(this.combat.progression?.bonuses.combo??0), kicked: false };
         a.anchor = { ...this.planted };
         this.hitArea(player, { x, z, radius: 1.65, damage: 39, cone: -.1, knock: .6, stagger: 1.65 }); this.impact(player, 'slam', x, z);
       } else if (a.id === 'sweep') {
@@ -256,7 +257,7 @@ export class Warrior {
     }
     if (a.elapsed >= a.duration) {
       if (a.comboEligible && !a.comboCounted) this.breakCombo('공격이 빗나갔어요');
-      else if (a.comboCounted && !this.ultimate.ready) this.combo.remaining = 3;
+      else if (a.comboCounted && !this.ultimate.ready) this.combo.remaining = 3+(this.combat.progression?.bonuses.combo??0);
       this.active = null;
       const queued = this.queued; this.queued = null;
       if (queued && !this.reason(queued.id, player)) {

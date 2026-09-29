@@ -23,7 +23,7 @@ export class Forestry {
     if(!tree.alive||damage<=0)return;
     const critical=tree.offBalance>0||context.forceCritical===true;
     const efficiency=(context.weapon??this.combat.weapon)==='axe'?1+this.bonus:.5;
-    damage=Math.max(1,Math.round(damage*efficiency*(critical?2:1)));
+    damage=Math.max(1,Math.round(damage*efficiency*(critical?this.combat.criticalMultiplier:1)));
     if(critical){tree.offBalance=0;this.combat.criticalHits++;}
     tree.hp=Math.max(0,tree.hp-damage);tree.flash=.25;tree.shakeX=dx;tree.shakeZ=dz;
     this.combat.lastHit={targetId:tree.id,damage,critical,time:this.combat.time,...context};
@@ -33,6 +33,7 @@ export class Forestry {
       const length=Math.hypot(dx,dz)||1;tree.fallX=dx/length;tree.fallZ=dz/length;
       const wood=(tree.scale>=1.2?6:4)+(critical?2:0);
       tree.reward=wood;tree.dropPending=true;this.felled++;
+      this.combat.progression?.add('tree');
       this.combat.events.push({type:'tree-felled',id:tree.id,x:tree.x,y:tree.y+.6,z:tree.z,wood,bonus:critical?2:0});
     }
     return {damage,critical,killed:!tree.alive};

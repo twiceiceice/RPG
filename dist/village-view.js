@@ -1,6 +1,6 @@
 import * as THREE from './vendor/three.module.js';
 import { terrainHeight } from './movement.js';
-import { VILLAGE } from './village-data.js';
+import { VILLAGE, BUILD_PLOTS } from './village-data.js';
 
 const material=color=>new THREE.MeshStandardMaterial({color,roughness:.92});
 const timber=material(0x66503c),plaster=material(0xe2cfa0),stone=material(0x93958a),dark=material(0x373e38);
@@ -32,7 +32,7 @@ export function createVillageScenery(scene,environment) {
     const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(verts,3));geometry.setIndex(indices);geometry.computeVertexNormals();
     const m=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({color:0xc3b181,roughness:1,side:THREE.DoubleSide}));m.receiveShadow=true;root.add(m);
   }
-  road(2,8,13,15,2.8);road(13,15,38,15,4);road(20,7,20,23,3);road(32,7,32,24,3);road(19,20,37,20,2.8);
+  road(2,8,13,15,2.8);road(13,15,62,15,5.5);road(20,3,20,29,3.5);road(32,7,32,29,3.5);road(15,25,42,25,3.5);road(43,-3,43,33,3.5);road(22,7,44,7,3);road(43,19,61,19,2.5);
   const plaza=new THREE.Mesh(new THREE.CylinderGeometry(6.4,6.4,.045,12),material(0xb6ae8a));plaza.position.set(26,.03,16);plaza.receiveShadow=true;root.add(plaza);
   for(let i=0;i<12;i++){const a=i*Math.PI/6,p=box(root,stone,26+Math.sin(a)*6.5,.04,16+Math.cos(a)*6.5,1.55,.09,.34);p.rotation.y=a;}
   function house(x,z,w,d,roofColor,front=1,sign='') {
@@ -54,18 +54,18 @@ export function createVillageScenery(scene,environment) {
     if(sign){const s=label(sign);s.position.set(x,3.13,fz+front*.32);s.scale.multiplyScalar(.77);root.add(s);}
     solid(stone,x,0,fz+front*.37,1.75,.18,.72);
   }
-  house(17,6.4,5.2,4.8,0x9b6045,1,'목재 상점');house(32,6,5.6,5,0x557d72,1,'나리의 약초');
-  house(35.5,24.3,6,5,0x505c65,-1,'대장간');house(24,25,7,5,0xa8694c,-1,'솔바람 여관');house(16,24,5,4,0x7b8352,-1,'호두의 건축 자재');
+  house(17,1,5.2,4.8,0x9b6045,1,'목재 상점');house(37.5,10,5.6,5,0x557d72,1,'나리의 약초');
+  house(37,31,6,5,0x505c65,-1,'대장간');house(26,32,7,5,0xa8694c,-1,'솔바람 여관');house(16,30,5,4,0x7b8352,-1,'호두의 건축 자재');
   function stall(x,z,color) {
     for(const a of [-1,1])for(const b of [-1,1])box(root,timber,x+a*1.42,1.15,z+b*.58,.14,2.3,.14);
     solid(timber,x,0,z,2.85,.83,1.06);
     const stripe=material(color);for(let i=0;i<6;i++){const m=box(root,i%2?plaster:stripe,x-1.36+i*.54,2.36,z,.55,.14,1.8);m.rotation.x=.1;}
   }
-  stall(20,9.65,0xa97445);stall(32,9.65,0x6a9471);
-  for(let i=0;i<5;i++)box(root,timber,19.1+i*.42,1,9.65,.32,.27,.83);
+  stall(20,5.65,0xa97445);stall(32,9.65,0x6a9471);
+  for(let i=0;i<5;i++)box(root,timber,19.1+i*.42,1,5.65,.32,.27,.83);
   for(let i=0;i<6;i++){box(root,material(i%2?0xb97186:0x70a69d),31+i*.37,1.04,9.65,.23,.38,.27);box(root,timber,31+i*.37,1.29,9.65,.13,.12,.15);}
-  solid(dark,37,0,20.5,1.35,.55,.9);solid(stone,37,.55,20.5,1.65,.35,.65);box(root,dark,37.75,.8,20.5,.65,.18,.4);
-  solid(stone,39,0,24,1.45,1.4,1.3);box(root,material(0xd57c31),39,.6,23.31,.91,.74,.1);
+  solid(dark,39,0,26.3,1.35,.55,.9);solid(stone,39,.55,26.3,1.65,.35,.65);box(root,dark,39.75,.8,26.3,.65,.18,.4);
+  solid(stone,41,0,31,1.45,1.4,1.3);box(root,material(0xd57c31),41,.6,30.31,.91,.74,.1);
   for(let i=0;i<8;i++){const a=i*Math.PI/4,m=box(root,stone,26+Math.sin(a),.53,16+Math.cos(a),.87,1.02,.35);m.rotation.y=a;environment.cameraSurfaces.push(m);}
   environment.colliders.push({minX:24.8,maxX:27.2,minZ:14.8,maxZ:17.2,bottom:0,top:1.05});
   const water=new THREE.Mesh(new THREE.CircleGeometry(.92,16),material(0x588d96));water.rotation.x=-Math.PI/2;water.position.set(26,.68,16);root.add(water);
@@ -78,14 +78,23 @@ export function createVillageScenery(scene,environment) {
     for(let i=0;i<parts;i++){const t=(i+.5)/parts,x=ax+(bx-ax)*t,z=az+(bz-az)*t;if(gap&&z>11.2&&z<18.8)continue;
       const w=bx===ax?.13:length/parts,d=bx===ax?length/parts:.13;solid(timber,x,.48,z,w,.14,d);solid(timber,x,.98,z,w,.14,d);}
   }
-  fence(11,2,41,2);fence(41,2,41,28);fence(11,28,41,28);fence(11,2,11,28,true);
+  fence(11,-7,65,-7);fence(65,-7,65,37);fence(11,37,65,37);fence(11,-7,11,37,true);
   solid(timber,11,0,11.6,.48,3.8,.48);solid(timber,11,0,18.4,.48,3.8,.48);box(root,timber,11,3.63,15,.6,.45,7.8);
   const welcome=label(VILLAGE.name,'주민과 여행자의 쉼터');welcome.position.set(10.85,3.9,15);welcome.scale.set(3.8,1.31,1);root.add(welcome);
   function lamp(x,z){solid(timber,x,0,z,.18,2.6,.18);box(root,dark,x,2.62,z,.48,.12,.48);box(root,glass,x,2.92,z,.34,.48,.34);box(root,dark,x,3.22,z,.52,.15,.52);}
-  lamp(14,11);lamp(14,19.8);lamp(23,12);lamp(29,21);lamp(38,14);
+  lamp(14,11);lamp(14,19.8);lamp(23,12);lamp(29,21);lamp(41,14);lamp(44,31);lamp(44,-4);lamp(61,17);
   for(const [x,z] of [[15,10.3],[17,10.1],[36,11],[37.3,11.2],[38,22.2]]){solid(timber,x,0,z,.85,.8,.85);box(root,plaster,x,.81,z,.92,.06,.14);}
-  for(const [x,z,mat] of [[18.7,22.6,timber],[18.7,24,stone],[18.7,25.4,material(0xaa6750)]]){solid(mat,x,0,z,.85,.85,.85);solid(mat,x,.85,z,.65,.65,.65);}
+  for(const [x,z,mat] of [[19,29,timber],[19,30.4,stone],[19,31.8,material(0xaa6750)]]){solid(mat,x,0,z,.85,.85,.85);solid(mat,x,.85,z,.65,.65,.65);}
   for(const [x,z] of [[22,17],[30,17]]){solid(timber,x,0,z,1.5,.5,.48);box(root,timber,x,.88,z+.24,1.5,.65,.12);}
+  const plotMaterial=material(0x91a56d),borderMaterial=material(0xc9c69b);
+  for(const p of BUILD_PLOTS){
+    const w=p.maxX-p.minX,d=p.maxZ-p.minZ,x=(p.minX+p.maxX)/2,z=(p.minZ+p.maxZ)/2;
+    box(root,plotMaterial,x,.016,z,w,.02,d).castShadow=false;
+    for(const edge of [-1,1]){box(root,borderMaterial,x,.035,z+edge*d/2,w,.035,.07);box(root,borderMaterial,x+edge*w/2,.035,z,.07,.035,d);}
+    for(const sx of [p.minX,p.maxX])for(const sz of [p.minZ,p.maxZ])box(root,timber,sx,.30,sz,.12,.60,.12);
+    const sign=label(p.name,`${w} × ${d} · K 건축`, '#ecdfa5');sign.position.set(p.entry.x,1.35,p.entry.z-1);root.add(sign);
+    // The plot border is visual only, so players can walk in from every side.
+  }
   return root;
 }
 

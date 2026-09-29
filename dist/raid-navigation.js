@@ -3,7 +3,7 @@ import {terrainHeight,overlaps} from './movement.js';
 // A small shared grid routes combatants through gates and around houses.
 // Movement still checks the live colliders, including regrowing trees.
 export class RaidNavigation {
-  constructor(colliders){this.colliders=colliders;this.minX=-47;this.minZ=-7;this.size=1;this.width=93;this.depth=42;this.rebuild();}
+  constructor(colliders){this.colliders=colliders;this.minX=-47;this.minZ=-10;this.size=1;this.width=115;this.depth=51;this.rebuild();}
   clear(x,z,r=.38){const y=terrainHeight(x,z);return !this.colliders.some(b=>b.active!==false&&b.top>y+.27&&b.bottom<y+1.8&&overlaps(x,z,b,r));}
   rebuild(){this.grid=Array.from({length:this.width*this.depth},(_,i)=>this.clear(this.minX+i%this.width,this.minZ+Math.floor(i/this.width)));}
   direct(a,b){const d=Math.hypot(b.x-a.x,b.z-a.z),steps=Math.ceil(d/.35);for(let i=1;i<=steps;i++)if(!this.clear(a.x+(b.x-a.x)*i/steps,a.z+(b.z-a.z)*i/steps))return false;return true;}

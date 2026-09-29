@@ -7,10 +7,14 @@ import { WARRIOR_SKILLS } from './warrior.js';
 import { WarriorView } from './warrior-view.js';
 import { ForestryView } from './forestry-view.js';
 import { Village } from './village.js';
-import { VILLAGE, BUILDING_BLOCKS } from './village-data.js';
+import { VILLAGE, BUILDING_BLOCKS, BUILD_PLOTS, plotAt } from './village-data.js';
 import { createVillageScenery, VillageView } from './village-view.js';
 import { Raids } from './raids.js';
 import { createRaidScenery, RaidView } from './raid-view.js';
+import { TALENTS, TALENT_BRANCHES } from './progression.js';
+import { GameAudio } from './audio.js';
+import { Building } from './building.js';
+import { BuildingView } from './building-view.js';
 
 const $ = id => document.getElementById(id);
 const world = $('world'), loading = $('loading');
@@ -39,6 +43,10 @@ const hunting = new Hunting(environment.colliders, environment.trees);
 const forestry = hunting.forestry;
 let localSave=null;try{localSave=window.localStorage;}catch{/* Private browsing may disable storage. */}
 const village=new Village(hunting,localSave);
+const progression=village.progression;
+const audio=new GameAudio(localSave);
+const building=new Building(village,environment.colliders);
+const buildingView=new BuildingView(scene,camera,environment,building);
 const villageView=new VillageView(scene,camera,village);
 const forestryView = new ForestryView(scene,camera,forestry,environment.trees);
 const huntingView = new HuntingView(scene, camera, avatar, hunting, environment);
@@ -60,11 +68,60 @@ let woodReceipt = null;
 let hitFeedback = 0;
 let cameraShake = 0, impactPause = 0;
 let talkingTo=null,tradeCategory='buy';
+let buildingMode=false,buildMaterial='timber';
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function notify(message) {
   $('toast').textContent = message; $('toast').hidden = false;
   clearTimeout(toastTimer); toastTimer = setTimeout(() => { $('toast').hidden = true; }, 3600);
+}
+function menuOpen(){return !!document.querySelector('dialog[open]');}
+function talentReason(reset=false){
+  if(hunting.hp<=0)return '먼저 다시 일어나 주세요.';
+  if(raids.active||hunting.sinceHit<6||warrior.active||warrior.planted||hunting.drawing)return '전투와 동작을 마친 뒤 특성을 골라 주세요.';
+  if(reset&&!village.isSafe(player))return '마을 안에서 무료로 다시 고를 수 있어요.';
+  return null;
+}
+function learnTalent(id){const reason=talentReason();const result=reason?{accepted:false,reason}:progression.learn(id);renderTalents();$('talent-message').textContent=result.message??result.reason;updateHUD();return result;}
+function resetTalents(){const reason=talentReason(true);const result=reason?{accepted:false,reason}:progression.reset();renderTalents();$('talent-message').textContent=result.message??result.reason;updateHUD();return result;}
+function renderTalents(){
+  const s=progression.state();$('talent-level').textContent=`레벨 ${s.level} / 10`;$('talent-xp').textContent=s.required?`${s.current} / ${s.required} XP`:'최고 레벨 달성';$('talent-points').textContent=`남은 포인트 ${s.points}`;
+  const tree=$('talent-tree');tree.replaceChildren();
+  for(const branch of TALENT_BRANCHES){
+    const column=document.createElement('section');column.className='talent-branch';column.style.setProperty('--branch-color',branch.color);
+    const heading=document.createElement('h3');heading.textContent=branch.name;const detail=document.createElement('p');detail.className='branch-detail';detail.textContent=branch.detail;column.append(heading,detail);
+    for(const t of TALENTS.filter(t=>t.branch===branch.id)){
+      const rank=progression.rank(t.id),reason=talentReason()??progression.reason(t.id),card=document.createElement('button');card.className='talent-node'+(rank?' learned':'')+(reason?' locked':' available');card.disabled=!!reason;card.title=reason??`${t.name} 배우기 · 1점`;card.setAttribute('aria-label',`${t.name} ${rank}/${t.max} · ${t.description}${reason?' · '+reason:' · 배우기'}`);
+      const icon=document.createElement('span');icon.className='talent-icon';icon.textContent=t.icon;icon.setAttribute('aria-hidden','true');
+      const content=document.createElement('span');content.className='talent-content';const name=document.createElement('strong');name.textContent=t.name;const desc=document.createElement('span');desc.textContent=t.description;const note=document.createElement('small');note.textContent=rank===t.max?'모두 배움':s.level<t.level?`${t.level}레벨에 열림`:t.parent&&!progression.rank(t.parent)?'위 특성 1점 필요':reason??'클릭해서 배우기';content.append(name,desc,note);
+      const count=document.createElement('b');count.className='talent-rank';count.textContent=`${rank}/${t.max}`;card.append(icon,content,count);card.addEventListener('click',()=>learnTalent(t.id));column.append(card);
+    }
+    tree.append(column);
+  }
+  $('reset-talents').disabled=!!talentReason(true)||s.spent===0;$('reset-talents').title=talentReason(true)??'골드 소모 없이 포인트 반환';$('talent-message').textContent=talentReason()??'배운 특성은 바로 적용돼요.';
+}
+function openTalents(){if(menuOpen())return {accepted:false,reason:'열린 메뉴를 먼저 닫아 주세요.'};renderTalents();$('talents-dialog').showModal();setPaused(true);return {accepted:true};}
+function renderAudio(){for(const key of ['music','effects']){const value=Math.round(audio.settings[key]*100);$(key+'-volume').value=value;$(key+'-volume-value').textContent=value+'%';}$('audio-enabled').checked=audio.settings.enabled;$('audio-button').setAttribute('aria-label',audio.settings.enabled?'소리 설정 · 켜짐':'소리 설정 · 꺼짐');$('audio-button').textContent=audio.settings.enabled?'♫':'♪';$('audio-status').textContent=audio.available?'플레이 중 음악이 흐릅니다. 잠시 쉬거나 다른 탭으로 이동하면 소리도 쉬어요.':'이 브라우저에서는 소리를 시작하지 못했어요. 게임은 계속할 수 있습니다.';}
+function openAudio(){if(menuOpen())return;renderAudio();$('audio-dialog').showModal();setPaused(true);}
+function toggleBuild(value=!buildingMode){
+  if(value&&(!started||!village.isSafe(player)||hunting.hp<=0||menuOpen())){const reason='B로 마을에 온 뒤 K를 눌러 주세요. 전투 중에는 건축을 쉬어요.';notify(reason);return {accepted:false,reason};}
+  buildingMode=value;document.body.classList.toggle('building',value);$('build-hud').hidden=!value;$('build-button').setAttribute('aria-pressed',String(value));clearInput();
+  if(value){hunting.warrior.cancel();setPaused(false);notify('부지로 이동한 뒤 초록색 칸에 블록을 놓으세요.');}
+  updateHUD();world.focus({preventScroll:true});return {accepted:true};
+}
+function selectMaterial(type){if(!Object.hasOwn(BUILDING_BLOCKS,type))return;buildMaterial=type;for(const b of document.querySelectorAll('[data-material]'))b.setAttribute('aria-pressed',String(b.dataset.material===type));}
+function travelToPlot(id=$('plot-select').value){
+  const plot=BUILD_PLOTS.find(p=>p.id===id),reason=village.travelReason(player);if(!plot||reason||menuOpen()){const r={accepted:false,reason:reason??'열린 메뉴를 닫고 건축 부지를 골라 주세요.'};notify(r.reason);return r;}
+  Object.assign(player,{x:plot.entry.x,z:plot.entry.z,y:0,vx:0,vz:0,vy:0,grounded:true,jumpBuffer:0});started=true;$('welcome').hidden=true;$('crosshair').hidden=false;setPaused(false);toggleBuild(true);
+  $('plot-select').value=id;yaw=plot.id==='pine'?0:-Math.PI/2;pitch=.45;cameraDistance=7;avatar.root.rotation.y=yaw+Math.PI;updateCamera(1,true);animateAvatar(0,0);updateHUD();notify(`${plot.name} · K 건축 종료 · 호두에게 자재 구매`);return {accepted:true};
+}
+function buildAction(remove=false){
+  if(!buildingMode||paused)return {accepted:false,reason:'K 건축 모드를 켜고 플레이를 이어 가세요.'};
+  buildingView.update(true,buildMaterial,player);const result=remove?building.remove(buildingView.removeId,player):buildingView.candidate?building.place(buildingView.candidate,player):{accepted:false,reason:'건축 부지의 바닥이나 놓은 블록을 바라봐 주세요.'};
+  if(result.accepted){audio.event({type:remove?'build-remove':'build-place'});buildingView.sync();}else notify(result.reason);updateHUD();return result;
+}
+function updateGrowthHUD(){const s=progression.state();$('player-level').textContent=`Lv. ${s.level} 전사`;$('xp-meter').max=s.required||1;$('xp-meter').value=s.required?s.current:1;$('xp-value').textContent=s.required?`${s.current} / ${s.required} XP`:'최고 레벨';$('talent-badge').hidden=s.points===0;$('talent-badge').textContent=s.points;
+  if(buildingMode){for(const k of Object.keys(BUILDING_BLOCKS))$('build-'+k).textContent=village.blocks[k];$('build-count').textContent=`${building.blocks.size} / 600 블록`;$('build-title').textContent=plotAt(player.x,player.z)?.name??'나의 건축 부지';$('build-hint').textContent=buildingView.candidate?buildingView.reason??'초록색 칸 · 좌클릭으로 설치할 수 있어요.':'화면 가운데 조준점을 건축 부지에 맞춰 주세요.';}
 }
 function clearInput() { cancelBowDraw(); warrior.queued = null; keys.clear(); touchX = touchZ = 0; dragging = null; $('stick').style.transform = ''; }
 function capturePointer(element, pointerId) {
@@ -73,7 +130,8 @@ function capturePointer(element, pointerId) {
 }
 function setPaused(value) {
   paused = value; clearInput(); accumulator = 0;
-  $('resume').hidden = !value || !started || $('help-dialog').open || $('trade-dialog').open || $('battle-dialog').open || hunting.hp <= 0;
+  $('resume').hidden = !value || !started || menuOpen() || hunting.hp <= 0;
+  audio.setPlaying(!value&&started);
   if (value && document.pointerLockElement) document.exitPointerLock();
 }
 async function lockMouse() {
@@ -86,6 +144,7 @@ async function lockMouse() {
   }
 }
 function play() {
+  void audio.unlock();
   if (hunting.hp <= 0) return;
   started = true; setPaused(false); $('welcome').hidden = true;
   $('crosshair').hidden = false;
@@ -99,6 +158,7 @@ function setView(mode) {
   updateCamera(1, true);
 }
 function resetPosition() {
+  if(buildingMode)toggleBuild(false);
   raids.abort();if($('battle-dialog').open)$('battle-dialog').close();
   if($('trade-dialog').open)$('trade-dialog').close();
   const reviving = hunting.hp <= 0;
@@ -128,6 +188,7 @@ function equipWeapon(weapon) {
   updateCamera(1, true); world.focus({ preventScroll: true });
 }
 function attack() {
+  if(buildingMode)return buildAction().accepted;
   if (!started || paused || hunting.hp <= 0) return false;
   if(village.isSafe(player)){notify('마을은 안전 지역이에요. 서쪽 문을 나가면 전투할 수 있어요.');return false;}
   const aim = huntingView.aim();
@@ -137,6 +198,7 @@ function attack() {
   return attacked;
 }
 function useWarriorSkill(skill, showHint = true) {
+  if(buildingMode)return {accepted:false,reason:'K로 건축을 마친 뒤 기술을 사용하세요.'};
   const result = !started || paused ? { accepted: false, reason: '플레이를 시작하거나 이어 가세요.' }
     : warrior.request(skill, player, { x: -Math.sin(yaw), z: -Math.cos(yaw) });
   if (!result.accepted && showHint) notify(result.reason);
@@ -149,7 +211,7 @@ function upgradeHandle() {
   village.save();updateHUD();if(talkingTo)renderTrade();return result;
 }
 function travelToVillage() {
-  const reason=$('trade-dialog').open||$('help-dialog').open||$('battle-dialog').open?'열린 메뉴를 먼저 닫아 주세요.':village.travelReason(player);
+  const reason=menuOpen()?'열린 메뉴를 먼저 닫아 주세요.':village.travelReason(player);
   if(reason){notify(reason);return {accepted:false,reason};}
   Object.assign(player,{x:VILLAGE.entry.x,z:VILLAGE.entry.z,y:terrainHeight(VILLAGE.entry.x,VILLAGE.entry.z),vx:0,vz:0,vy:0,grounded:true,jumpBuffer:0});
   hunting.inSanctuary=true;hunting.autoMelee.targetId=null;hunting.swing=0;impactPause=0;
@@ -170,12 +232,13 @@ function renderBattle(){
   $('retreat-button').hidden=!raids.active;
 }
 function openBattle(){
-  if($('help-dialog').open||$('trade-dialog').open)return {accepted:false,reason:'열린 메뉴를 먼저 닫아 주세요.'};
+  if(menuOpen())return {accepted:false,reason:'열린 메뉴를 먼저 닫아 주세요.'};
   renderBattle();if(!$('battle-dialog').open)$('battle-dialog').showModal();setPaused(true);return {accepted:true};
 }
 function startBattle(mode){
   if(!$('battle-dialog').open)return {accepted:false,reason:'J 전투 메뉴를 먼저 열어 주세요.'};
   const result=raids.start(mode,player);if(!result.accepted){notify(result.reason);renderBattle();return result;}
+  if(buildingMode)toggleBuild(false);
   started=true;$('welcome').hidden=true;$('crosshair').hidden=false;$('battle-dialog').close();setPaused(false);
   yaw=Math.PI/2;pitch=.34;cameraDistance=10;avatar.root.rotation.y=-Math.PI/2;impactPause=0;
   updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});return result;
@@ -227,6 +290,7 @@ function tradeWithResident(offerId) {
   const result=village.trade(talkingTo,offerId,player);if(talkingTo==='hodu'){const offer=village.offers(talkingTo).find(o=>o.id===offerId);if(offer)tradeCategory=offer.category;}renderTrade(result.message??result.reason);updateHUD();return result;
 }
 function beginBowDraw(owner) {
+  if(buildingMode)return false;
   if (!started || paused || village.isSafe(player) || drawOwner || !hunting.beginDraw()) return false;
   drawOwner = owner;
   return true;
@@ -246,6 +310,16 @@ function releaseBowDraw(owner) {
   const aim = huntingView.aim();
   return hunting.releaseDraw(player, { x: -Math.sin(yaw), y: aim.direction.y, z: -Math.cos(yaw) }, aim.point);
 }
+const unlockAudio=()=>{if(!audio.context||audio.context.state==='suspended')void audio.unlock();};
+document.addEventListener('pointerdown',unlockAudio,{capture:true});document.addEventListener('keydown',unlockAudio,{capture:true});
+$('talents-button').addEventListener('click',openTalents);$('close-talents').addEventListener('click',()=>$('talents-dialog').close());$('reset-talents').addEventListener('click',resetTalents);
+$('audio-button').addEventListener('click',openAudio);$('close-audio').addEventListener('click',()=>$('audio-dialog').close());
+for(const id of ['talents-dialog','audio-dialog'])$(id).addEventListener('close',()=>{setPaused(!started||document.hidden||!document.hasFocus()||menuOpen());updateHUD();world.focus({preventScroll:true});});
+$('audio-enabled').addEventListener('change',()=>{audio.set('enabled',$('audio-enabled').checked);renderAudio();});
+for(const key of ['music','effects'])$(key+'-volume').addEventListener('input',()=>{audio.set(key,Number($(key+'-volume').value)/100);renderAudio();});
+$('build-button').addEventListener('click',()=>toggleBuild());$('build-close').addEventListener('click',()=>toggleBuild(false));$('plot-travel').addEventListener('click',()=>travelToPlot());
+for(const b of document.querySelectorAll('[data-material]'))b.addEventListener('click',()=>{selectMaterial(b.dataset.material);world.focus({preventScroll:true});});
+$('place-block').addEventListener('click',()=>{buildAction();world.focus({preventScroll:true});});$('remove-block').addEventListener('click',()=>{buildAction(true);world.focus({preventScroll:true});});
 $('sword-button').addEventListener('click', () => equipWeapon('sword'));
 $('bow-button').addEventListener('click', () => equipWeapon('bow'));
 $('axe-button').addEventListener('click', () => equipWeapon('axe'));
@@ -283,11 +357,15 @@ document.addEventListener('pointerlockerror', () => {
   if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~4 연계 · 5 궁극기');
 });
 document.addEventListener('keydown', event => {
-  if ($('help-dialog').open || $('trade-dialog').open || $('battle-dialog').open) return;
+  if (menuOpen()) return;
+  // Let focused controls keep their native Enter/Space/arrow behavior.
+  if(event.target.closest?.('button,input,select,textarea')&&['Enter','Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(event.code))return;
   if (event.code === 'Escape') { if (started && !locked && hunting.hp > 0) setPaused(!paused); return; }
-  if (event.code === 'Enter' && !started) { play(); return; }
+  if (event.code === 'Enter' && !started) { event.preventDefault();play(); return; }
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   if (event.repeat) return;
+  if(event.code==='KeyP'){event.preventDefault();openTalents();return;}
+  if(event.code==='KeyK'){event.preventDefault();toggleBuild();return;}
   if (event.code === 'KeyV') setView(firstPerson ? 'third' : 'first');
   if (event.code === 'KeyR') resetPosition();
   if (event.code === 'KeyZ') equipWeapon('axe');
@@ -297,14 +375,15 @@ document.addEventListener('keydown', event => {
   if (event.code === 'KeyB') {event.preventDefault();travelToVillage();return;}
   if (event.code === 'KeyJ') {event.preventDefault();openBattle();return;}
   if (!started || paused) return;
+  if(buildingMode&&['Digit1','Digit2','Digit3'].includes(event.code)){event.preventDefault();selectMaterial(['timber','stone','roof'][Number(event.code.slice(-1))-1]);return;}
   if(event.code==='KeyH'){event.preventDefault();usePotion();return;}
   if(event.code==='KeyG'){event.preventDefault();rallyResidents();return;}
-  if(event.code==='KeyE'&&village.nearest(player)){event.preventDefault();openResident();return;}
+  if(event.code==='KeyE'&&!buildingMode&&village.nearest(player)){event.preventDefault();openResident();return;}
   const skill = WARRIOR_SKILLS.find(s => event.code === 'Digit' + s.key);
   if (skill) { event.preventDefault(); useWarriorSkill(skill.id); return; }
   keys.add(event.code);
   if (event.code === 'Space') player.jump();
-  if (event.code === 'KeyF') { if (hunting.weapon === 'bow') beginBowDraw('keyboard'); else attack(); }
+  if (event.code === 'KeyF') { if (buildingMode)buildAction();else if (hunting.weapon === 'bow') beginBowDraw('keyboard'); else attack(); }
 });
 document.addEventListener('keyup', event => {
   keys.delete(event.code);
@@ -328,7 +407,7 @@ document.addEventListener('mousemove', event => {
 world.addEventListener('contextmenu', event => event.preventDefault());
 // Mouse up is separate from pointer up: releasing left must fire even if right is still held.
 world.addEventListener('mousedown', event => {
-  if (event.button !== 0 || hunting.weapon !== 'bow') return;
+  if (buildingMode||event.button !== 0 || hunting.weapon !== 'bow') return;
   event.preventDefault(); world.focus({ preventScroll: true });
   if (beginBowDraw('mouse')) mouseDrawPosition = { x: event.clientX, y: event.clientY };
 });
@@ -341,8 +420,8 @@ window.addEventListener('mouseup', event => {
 });
 world.addEventListener('pointerdown', event => {
   if (!started || paused) return;
-  if (event.pointerType === 'mouse' && event.button === 0 && hunting.weapon === 'bow') return;
-  if (locked) { if (event.button === 0) attack(); return; }
+  if (!buildingMode&&event.pointerType === 'mouse' && event.button === 0 && hunting.weapon === 'bow') return;
+  if (locked) { if(buildingMode&&event.button===2)buildAction(true);else if (event.button === 0) attack(); return; }
   dragging = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: 0, type: event.pointerType, button: event.button };
   capturePointer(world, event.pointerId); world.focus();
 });
@@ -356,9 +435,11 @@ window.addEventListener('pointerup', event => {
   if (event.pointerId === touchDrawPointer) { releaseBowDraw(`touch:${event.pointerId}`); return; }
   if (!dragging || event.pointerId !== dragging.id) return;
   const click = dragging.moved < 5 && dragging.type === 'mouse' && dragging.button === 0;
+  const recover=buildingMode&&dragging.moved<5&&dragging.button===2;
   dragging = null;
   if (world.hasPointerCapture(event.pointerId)) world.releasePointerCapture(event.pointerId);
   if (click) attack();
+  if (recover) buildAction(true);
 });
 window.addEventListener('pointercancel', event => {
   if (event.pointerId === touchDrawPointer || (event.pointerType === 'mouse' && drawOwner === 'mouse')) cancelBowDraw();
@@ -394,6 +475,7 @@ for (const type of ['pointerup', 'pointercancel', 'lostpointercapture']) joystic
 $('touch-jump').addEventListener('pointerdown', event => { event.preventDefault(); if (started && !paused) player.jump(); });
 $('touch-attack').addEventListener('pointerdown', event => {
   event.preventDefault();
+  if(buildingMode){buildAction();return;}
   if (hunting.weapon !== 'bow') { attack(); return; }
   if (beginBowDraw(`touch:${event.pointerId}`)) {
     touchDrawPointer = event.pointerId; capturePointer($('touch-attack'), event.pointerId);
@@ -430,7 +512,7 @@ function updateCamera(dt, immediate = false) {
   focus.set(player.x, player.y + 1.22, player.z);
   const action = warrior.active, widen = !reduceMotion && action ? action.id==='spin' ? Math.min(1,action.elapsed/.2,(action.duration-action.elapsed)/.2)*1.3 : ['kick','sweep'].includes(action.id) ? Math.sin(action.elapsed/action.duration*Math.PI)*(action.id==='sweep'?1.25:.85) : 0 : 0;
   desired.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(cameraDistance + widen).add(focus);
-  const bow = hunting.weapon === 'bow';
+    const bow = hunting.weapon === 'bow'||buildingMode;
   if (bow) { focus.y += .22; desired.y += .22; desired.x += Math.cos(yaw) * .68; desired.z -= Math.sin(yaw) * .68; }
   safeCameraPosition(focus, desired);
   if (immediate) camera.position.copy(desired);
@@ -465,7 +547,7 @@ function animateAvatar(dt, time) {
 function updateWarriorHUD() {
   const nearbyOpening=hunting.targets().find(e=>e.alive&&e.offBalance>0&&Math.hypot(e.x-player.x,e.z-player.z)<18);
   $('critical-opening').hidden = !started || !nearbyOpening;
-  if(nearbyOpening)$('critical-opening').textContent=nearbyOpening.kind==='tree'?'✦ 금이 간 나무 · 다음 적중은 치명타 ×2':'✦ 비틀거리는 적 · 다음 적중은 치명타 ×2';
+  if(nearbyOpening)$('critical-opening').textContent=`✦ ${nearbyOpening.kind==='tree'?'금이 간 나무':'비틀거리는 적'} · 다음 적중은 치명타 ×${hunting.criticalMultiplier}`;
   const a = warrior.active;
   const progress = a ? a.elapsed / a.duration : 0;
   const elapsed = a?.elapsed ?? 0;
@@ -501,25 +583,26 @@ function updateWarriorHUD() {
     : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '현재 위치에서 도끼를 끌어오기' : elapsed < .90 ? '낮게 버티고 크게 몸 틀기' : '온몸으로 휘두르는 넓은 가로베기', slash: a.automatic ? '근접 자동 공격 · 기술 입력이 우선해요' : '기본 공격 중', spin: a.stage===2 ? `끌어당기는 중 · 연속 ${a.streak}/3 · 다음 치명타까지 ${3-a.streak}회` : `연속 ${a.streak}/3 적중 → 흡입 강화 · WASD 이동` }[a.id]
     : warrior.planted ? `${warrior.planted.kicked ? '4 가로베기' : '3 날아차기 → 4 가로베기'} · 시점으로 방향 선택 · ${warrior.planted.remaining.toFixed(1)}초`
     : '1 돌진 → 2 내려찍기 → 3 날아차기 → 4 가로베기';
-  $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / 3.4 * 100 : 0}%`;
+  $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / (3.4+progression.bonuses.combo) * 100 : 0}%`;
 }
 function updateHUD() {
+  updateGrowthHUD();
   updateRaidHUD();
   const safe=village.isSafe(player),near=village.nearest(player);
   $('place-name').textContent=raids.active?(raids.mode==='defense'?'솔바람 마을 · 교전 중':'붉은발 야영지'):safe?VILLAGE.name:'시작의 들판';
   $('gold-count').textContent=village.gold;
   $('potion-button').textContent=village.potionCooldown>0?`물약 ${village.potionCooldown.toFixed(1)}초`:`H 물약 ${village.potions}`;
-  $('potion-button').disabled=!started||paused||hunting.hp<=0||hunting.hp>=100||village.potions<1||village.potionCooldown>0;
+  $('potion-button').disabled=!started||paused||hunting.hp<=0||hunting.hp>=hunting.maxHp||village.potions<1||village.potionCooldown>0;
   $('village-status').textContent=raids.active?'J 전투 메뉴 · G 주민 지시':safe?'솔바람 마을 · J 방어와 출정':`솔바람 마을 ${Math.round(Math.hypot(player.x-VILLAGE.entry.x,player.z-VILLAGE.entry.z))}m · B 이동`;
   $('village-status').classList.toggle('safe',safe);
-  $('interact-prompt').hidden=raids.active||!started||paused||!near||hunting.hp<=0;
+  $('interact-prompt').hidden=buildingMode||raids.active||!started||paused||!near||hunting.hp<=0;
   if(near)$('interact-label').textContent=`${near.name} · ${near.shop?'거래하기':'대화하기'}`;
   $('coordinates').textContent = `${player.x.toFixed(0)} / ${(-player.z).toFixed(0)}`;
   const speed = Math.hypot(player.vx, player.vz);
   $('motion-state').textContent = paused && started ? '잠시 쉬는 중' : !player.grounded ? (player.vy > 0 ? '뛰어오르는 중' : '내려오는 중') : speed > 6 ? '달리는 중' : speed > .2 ? '걷는 중' : '가만히 서 있는 중';
   const hp = Math.ceil(hunting.hp);
-  $('health-value').textContent = `${hp} / 100`;
-  $('health-fill').style.width = `${hp}%`; $('health-meter').setAttribute('aria-valuenow', String(hp));
+  $('health-value').textContent = `${hp} / ${hunting.maxHp}`;
+  $('health-fill').style.width = `${hp/hunting.maxHp*100}%`; $('health-meter').setAttribute('aria-valuenow', String(hp));$('health-meter').setAttribute('aria-valuemax',String(hunting.maxHp));
   $('health-fill').style.background = hp < 30 ? '#ed9984' : '#b3dc94';
   $('rabbit-count').textContent = hunting.kills.rabbit; $('slime-count').textContent = hunting.kills.slime;
   const automatic=!!(hunting.autoAttackRecovery || hunting.autoMelee.targetId),melee=hunting.weapon!=='bow';
@@ -536,13 +619,16 @@ function updateHUD() {
   const target = hunting.targets().find(e => e.id === aim.entity && e.alive);
   $('target-info').hidden = !target || !started;
   $('crosshair').classList.toggle('on-target', !!target);
-  if (target) { $('target-name').textContent = target.name??(target.kind==='tree'?(target.scale>=1.2?'굵은 소나무':'소나무'):target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]); $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; $('target-opening').textContent=target.kind==='tree'?'균열 · 다음 적중 2배':'비틀거림 · 다음 적중 2배'; }
+  if (target) { $('target-name').textContent = target.name??(target.kind==='tree'?(target.scale>=1.2?'굵은 소나무':'소나무'):target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]); $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; $('target-opening').textContent=`${target.kind==='tree'?'균열':'비틀거림'} · 다음 적중 ${hunting.criticalMultiplier}배`; }
   updateWarriorHUD();
-  $('warrior-hud').hidden=safe||hunting.weapon!=='axe';
+  $('warrior-hud').hidden=buildingMode||safe||hunting.weapon!=='axe';
   if(safe){$('combo-title').textContent='솔바람 마을 · 안전 지역';$('combo-hint').textContent='주민 가까이 E 대화 · H 물약 · 서쪽 문으로 들판';for(const s of WARRIOR_SKILLS)$('skill-'+s.id).classList.add('unavailable');}
 }
 function handleCombatEvents() {
   for (const event of hunting.events.splice(0)) {
+    audio.event(event);
+    if(event.type==='xp-earned'){const el=document.createElement('span');el.className='damage-number xp-reward';el.textContent=`+${event.amount} XP`;$('combat-fx').appendChild(el);floatingHits.push({el,position:new THREE.Vector3(player.x+.6,player.y+2.6,player.z),life:1.1});}
+    if(event.type==='level-up'){notify(`레벨 ${event.level}! 체력 회복 · P에서 특성 ${event.points}점 선택`);if($('talents-dialog').open)renderTalents();}
     if(event.type==='raid-notice')notify(event.message);
     else if(event.type==='raid-result'){notify(event.message);if(hunting.hp>0)openBattle();}
     else if(event.type==='ally-heal'||event.type==='ally-hit'){
@@ -553,7 +639,7 @@ function handleCombatEvents() {
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .25, event.z), life: event.critical ? 1.15 : .85 });
       huntingView.particleBurst(event.critical ? { ...event, kind: 'impact' } : event);
     } else if (event.type === 'off-balance') {
-      const el = document.createElement('span'); el.className = 'damage-number off-balance'; el.textContent = event.kind==='tree'?'균열 · 다음 공격 2배':'비틀거림'; $('combat-fx').appendChild(el);
+      const el = document.createElement('span'); el.className = 'damage-number off-balance'; el.textContent = event.kind==='tree'?`균열 · 다음 공격 ${hunting.criticalMultiplier}배`:'비틀거림'; $('combat-fx').appendChild(el);
       floatingHits.push({ el, position: new THREE.Vector3(event.x, event.y + .8, event.z), life: 1 });
     } else if (event.type === 'warrior-impact') {
       warriorView.effect(event); huntingView.particleBurst({ ...event, y: event.y + .2, kind: 'impact' });
@@ -617,7 +703,7 @@ function frame(milliseconds) {
       if (hunting.hp <= 0) break;
     }
   }
-  animateAvatar(dt, time); forestryView.update(player);villageView.update(player);updateCamera(dt);raidView.update();
+  animateAvatar(dt, time); forestryView.update(player);villageView.update(player);updateCamera(dt);raidView.update();buildingView.update(buildingMode&&!paused,buildMaterial,player);
   handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); warriorView.update(dt, firstPerson, player, paused); combatFeedback(dt);
   if (!paused) { cameraShake *= Math.exp(-18 * dt); camera.position.x += Math.sin(time * 61) * cameraShake; camera.position.y += Math.cos(time * 47) * cameraShake * .65; }
   environment.clouds.forEach((cloud, i) => { cloud.position.x += dt * (.15 + i * .01); if (cloud.position.x > 110) cloud.position.x = -110; });
@@ -633,7 +719,7 @@ window.addEventListener('resize', () => {
 renderer.domElement.addEventListener('webglcontextlost', event => {
   event.preventDefault(); setPaused(true); loading.textContent = '그래픽 연결이 끊겼어요. 새로고침하면 다시 시작할 수 있어요.'; loading.hidden = false;
 });
-equipWeapon('axe'); forestryView.update(player);villageView.update(player);updateHUD();updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true); renderer.render(scene, camera);
+renderAudio();equipWeapon('axe'); forestryView.update(player);villageView.update(player);updateHUD();updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true); renderer.render(scene, camera);
 loading.hidden = true; $('welcome').hidden = false;
 requestAnimationFrame(frame);
 
@@ -644,7 +730,8 @@ if (modelContext?.registerTool) {
   const state = () => ({
     position: { x: +player.x.toFixed(3), y: +player.y.toFixed(3), z: +player.z.toFixed(3) },
     grounded: player.grounded, view: firstPerson ? 'first' : 'third',
-    paused, started, health: Math.ceil(hunting.hp), weapon: hunting.weapon, kills: { ...hunting.kills },
+    paused, started, health: Math.ceil(hunting.hp), maxHealth:hunting.maxHp, weapon: hunting.weapon, kills: { ...hunting.kills },
+    progression:progression.state(),audio:audio.state(),building:{enabled:buildingMode,material:buildMaterial,...building.state(),candidate:buildingView.candidate,placementReason:buildingView.reason??null},
     bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
     warrior: warrior.state(),
     forestry: forestry.state(player),
@@ -658,8 +745,14 @@ if (modelContext?.registerTool) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
   };
   const tools = [
+    {name:'open_talents',title:'전사 특성 열기',description:'Open the same P talent tree visible in the game. Pauses play.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=openTalents();if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'learn_talent',title:'특성 배우기',description:'Spend one earned point in the open talent tree. Uses the same level, prerequisite and combat restrictions as the visible buttons.',inputSchema:{type:'object',properties:{talent:{type:'string',enum:TALENTS.map(t=>t.id)}},required:['talent'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!$('talents-dialog').open||!input||Object.keys(input).some(k=>k!=='talent'))throw new Error('Open the talent tree first.');const r=learnTalent(input.talent);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'set_build_mode',title:'건축 모드 전환',description:'Use the same K build mode. Only available in the peaceful village after play begins.',inputSchema:{type:'object',properties:{enabled:{type:'boolean'}},required:['enabled'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||typeof input.enabled!=='boolean'||Object.keys(input).some(k=>k!=='enabled'))throw new Error('Choose enabled.');const r=toggleBuild(input.enabled);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'travel_to_build_plot',title:'건축 부지로 이동',description:'Use the visible build panel plot selector and travel button. Requires build mode, no combat and closed dialogs.',inputSchema:{type:'object',properties:{plot:{type:'string',enum:BUILD_PLOTS.map(p=>p.id)}},required:['plot'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!buildingMode||!input||Object.keys(input).some(k=>k!=='plot'))throw new Error('Open build mode first.');const r=travelToPlot(input.plot);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'place_aimed_block',title:'블록 설치',description:'Place one selected inventory block at the current green aim preview, matching left click. Checks plot limits, range, occupancy and support.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=buildAction();if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'recover_aimed_block',title:'블록 회수',description:'Recover the player-built block currently aimed at, returning exactly one block to inventory. Matches right click.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=buildAction(true);if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'open_battle_menu',title:'방어와 출정 메뉴',description:'Open the visible J battle menu and pause the game. Battles start in the village.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=openBattle();if(!r.accepted)throw new Error(r.reason);return state();}},
-    {name:'start_village_battle',title:'방어 또는 출정 시작',description:'Use the open battle menu to start defense (two waves with seven residents) or assault (four volunteers against six camp enemies). Requires village proximity, living player and no active attack. Moves everyone to the visible battle staging position, then gives eight preparation seconds. Matches the two battle menu buttons.',inputSchema:{type:'object',properties:{mode:{type:'string',enum:['defense','assault']}},required:['mode'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||!['defense','assault'].includes(input.mode)||Object.keys(input).some(k=>k!=='mode'))throw new Error('Choose defense or assault.');const r=startBattle(input.mode);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'start_village_battle',title:'방어 또는 출정 시작',description:'Use the open battle menu to start defense (two waves with ten residents) or assault (seven volunteers against six camp enemies). Requires village proximity, living player and no active attack. Moves everyone to the visible battle staging position, then gives eight preparation seconds. Matches the two battle menu buttons.',inputSchema:{type:'object',properties:{mode:{type:'string',enum:['defense','assault']}},required:['mode'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||!['defense','assault'].includes(input.mode)||Object.keys(input).some(k=>k!=='mode'))throw new Error('Choose defense or assault.');const r=startBattle(input.mode);if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'rally_residents',title:'주민 집결 또는 교전',description:'Toggle G between rallying near the player and fighting nearby enemies. Requires an active unpaused battle. Matches the visible resident command button.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=rallyResidents();if(!r.accepted)throw new Error(r.reason);return state();}},
     { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read player, combat, warrior and forestry state: wood inventory, handle upgrade, nearby trees with health, cracks and regrowth, and dropped wood. Includes combo progress, ultimate readiness, spin statistics, creatures and autoMelee attack count. While playing, axe and sword automatically attack the nearest living creature within their normal melee reach and unobstructed height. Auto swings preserve movement and give way to skill inputs; auto attack waits during skills, planted-axe follow-ups and unfinished combo windows. Trees do not initiate auto attacks; bows remain manual.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
