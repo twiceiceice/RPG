@@ -1,5 +1,5 @@
 import { terrainHeight, overlaps } from './movement.js';
-import { VILLAGE, RESIDENTS, inVillage } from './village-data.js';
+import { VILLAGE, RESIDENTS, BUILDING_BLOCKS, inVillage } from './village-data.js';
 
 const SAVE_KEY='windfield-village-v1';
 const armorCosts=[20,35,50];
@@ -8,6 +8,7 @@ export class Village {
   constructor(combat,storage=null) {
     this.combat=combat;combat.village=this;this.storage=storage;this.storageAvailable=!!storage;
     this.gold=20;this.potions=1;this.armorLevel=0;this.potionCooldown=0;this.time=0;this.saveClock=0;this.lastSaved='';
+    this.blocks={timber:0,stone:0,roof:0};
     this.residents=RESIDENTS.map(n=>({...n,y:terrainHeight(n.x,n.z),step:0,moving:false,wait:1,routeIndex:0}));
     this.load();combat.armorLevel=this.armorLevel;
     for(const e of combat.entities)if(this.isSafe(e)){e.x=e.homeX=6;e.z=e.homeZ=18;e.y=terrainHeight(e.x,e.z);}
@@ -20,10 +21,11 @@ export class Village {
       const data=JSON.parse(raw);if(!data||data.version!==1)return;
       this.gold=integer(data.gold,20,999999);this.potions=integer(data.potions,1,99);this.armorLevel=integer(data.armorLevel,0,3);
       this.combat.forestry.wood=integer(data.wood,0,99999);this.combat.forestry.level=integer(data.handleLevel,0,3);
+      for(const key of Object.keys(this.blocks))this.blocks[key]=integer(data.blocks?.[key],0,99999);
     } catch { this.storageAvailable=false; }
   }
   save() {
-    const payload=JSON.stringify({version:1,gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,wood:this.combat.forestry.wood,handleLevel:this.combat.forestry.level});
+    const payload=JSON.stringify({version:1,gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,wood:this.combat.forestry.wood,handleLevel:this.combat.forestry.level,blocks:this.blocks});
     if(payload===this.lastSaved)return;
     try {if(this.storage){this.storage.setItem(SAVE_KEY,payload);this.storageAvailable=true;}this.lastSaved=payload;}
     catch {this.storageAvailable=false;}
@@ -56,6 +58,13 @@ export class Village {
     if(npcId==='nari')return [{id:'buy-potion',name:'회복 물약',detail:'H 키로 사용 · 체력 +45 · 사용 간격 4초',price:'12 골드',enabled:this.gold>=12&&this.potions<99,reason:this.potions>=99?'물약을 더 담을 수 없어요.':'골드가 부족해요.',icon:'potion'}];
     if(npcId==='doyun')return [{id:'reinforce',name:`갑옷 보강 ${Math.min(3,this.armorLevel+1)}단계`,detail:`받는 피해 −${Math.min(3,this.armorLevel+1)*2} · 현재 ${this.armorLevel}/3단계`,price:this.armorLevel===3?'보강 완료':`${armorCosts[this.armorLevel]} 골드`,enabled:this.armorLevel<3&&this.gold>=armorCosts[this.armorLevel],reason:this.armorLevel===3?'최대로 보강했어요.':'골드가 부족해요.',icon:'armor'}];
     if(npcId==='bori')return [{id:'rest',name:'따뜻한 식사와 휴식',detail:'체력을 전부 회복해요.',price:'5 골드',enabled:this.gold>=5&&this.combat.hp<100,reason:this.combat.hp>=100?'이미 체력이 가득해요.':'골드가 부족해요.',icon:'rest'}];
+    if(npcId==='hodu')return [
+      ...Object.entries(BUILDING_BLOCKS).flatMap(([key,b])=>[
+        {id:`buy-block-${key}`,block:key,category:'buy',name:`${b.name} 5개 구매`,detail:`${b.detail} · 보유 ${this.blocks[key]}개`,price:`${b.buy*5} 골드`,enabled:this.gold>=b.buy*5&&this.blocks[key]<=99994,reason:this.blocks[key]>99994?'블록을 더 담을 수 없어요.':'골드가 부족해요.',icon:b.icon},
+        {id:`sell-block-${key}`,block:key,category:'sell',name:`${b.name} 5개 판매`,detail:`보유 ${this.blocks[key]}개 · 남는 자재를 골드로 바꿔요.`,price:`+${b.sell*5} 골드`,enabled:this.blocks[key]>=5&&this.gold<=999999-b.sell*5,reason:this.blocks[key]<5?`${b.name} 5개가 필요해요.`:'골드가 가득 찼어요.',icon:b.icon},
+      ]),
+      {id:'barter-timber',category:'barter',name:'목재 → 나무 블록',detail:`목재 2개로 나무 블록 5개 받기 · 목재 ${wood}개 보유`,price:'목재 2개',enabled:wood>=2&&this.blocks.timber<=99994,reason:wood<2?'목재 2개가 필요해요.':'블록을 더 담을 수 없어요.',icon:'timber'},
+    ];
     return [];
   }
   trade(npcId,offerId,player) {
@@ -69,6 +78,12 @@ export class Village {
     if(offerId==='buy-potion'){this.gold-=12;this.potions++;message='회복 물약 1개를 챙겼어요. H 키로 사용할 수 있어요.';}
     if(offerId==='reinforce'){this.gold-=armorCosts[this.armorLevel];this.armorLevel++;this.combat.armorLevel=this.armorLevel;message=`갑옷 ${this.armorLevel}단계 · 받는 피해 −${this.armorLevel*2}`;}
     if(offerId==='rest'){this.gold-=5;this.combat.hp=100;this.combat.hurt=0;message='식사를 마쳤어요. 체력을 모두 회복했어요.';}
+    if(offer.block){
+      const block=BUILDING_BLOCKS[offer.block],buying=offer.category==='buy';
+      this.gold+=buying?-block.buy*5:block.sell*5;this.blocks[offer.block]+=buying?5:-5;
+      message=`${block.name} 5개 ${buying?'구매':'판매'} · 보유 ${this.blocks[offer.block]}개`;
+    }
+    if(offerId==='barter-timber'){this.combat.forestry.wood-=2;this.blocks.timber+=5;message='목재 2개를 나무 블록 5개로 교환했어요.';}
     this.save();return {accepted:true,message};
   }
   usePotion() {
@@ -109,7 +124,7 @@ export class Village {
     }
   }
   state(player) {
-    return {name:VILLAGE.name,safe:this.isSafe(player),gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,damageReduction:this.armorLevel*2,storageAvailable:this.storageAvailable,
+    return {name:VILLAGE.name,safe:this.isSafe(player),gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,blocks:{...this.blocks},damageReduction:this.armorLevel*2,storageAvailable:this.storageAvailable,
       potionCooldown:+this.potionCooldown.toFixed(2),nearestNpc:this.nearest(player)?.id??null,
       residents:this.residents.map(n=>({id:n.id,name:n.name,role:n.role,x:+n.x.toFixed(2),z:+n.z.toFixed(2),shop:!!n.shop,offers:this.offers(n.id)}))};
   }

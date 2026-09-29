@@ -55,7 +55,7 @@ export function createVillageScenery(scene,environment) {
     solid(stone,x,0,fz+front*.37,1.75,.18,.72);
   }
   house(17,6.4,5.2,4.8,0x9b6045,1,'목재 상점');house(32,6,5.6,5,0x557d72,1,'나리의 약초');
-  house(35.5,24.3,6,5,0x505c65,-1,'대장간');house(24,25,7,5,0xa8694c,-1,'솔바람 여관');house(16,24,5,4,0x7b8352,-1);
+  house(35.5,24.3,6,5,0x505c65,-1,'대장간');house(24,25,7,5,0xa8694c,-1,'솔바람 여관');house(16,24,5,4,0x7b8352,-1,'호두의 건축 자재');
   function stall(x,z,color) {
     for(const a of [-1,1])for(const b of [-1,1])box(root,timber,x+a*1.42,1.15,z+b*.58,.14,2.3,.14);
     solid(timber,x,0,z,2.85,.83,1.06);
@@ -84,6 +84,7 @@ export function createVillageScenery(scene,environment) {
   function lamp(x,z){solid(timber,x,0,z,.18,2.6,.18);box(root,dark,x,2.62,z,.48,.12,.48);box(root,glass,x,2.92,z,.34,.48,.34);box(root,dark,x,3.22,z,.52,.15,.52);}
   lamp(14,11);lamp(14,19.8);lamp(23,12);lamp(29,21);lamp(38,14);
   for(const [x,z] of [[15,10.3],[17,10.1],[36,11],[37.3,11.2],[38,22.2]]){solid(timber,x,0,z,.85,.8,.85);box(root,plaster,x,.81,z,.92,.06,.14);}
+  for(const [x,z,mat] of [[18.7,22.6,timber],[18.7,24,stone],[18.7,25.4,material(0xaa6750)]]){solid(mat,x,0,z,.85,.85,.85);solid(mat,x,.85,z,.65,.65,.65);}
   for(const [x,z] of [[22,17],[30,17]]){solid(timber,x,0,z,1.5,.5,.48);box(root,timber,x,.88,z+.24,1.5,.65,.12);}
   return root;
 }

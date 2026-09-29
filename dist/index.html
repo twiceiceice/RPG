@@ -35,6 +35,7 @@
     <span id="handle-state">벌목 +0% · 0/3</span>
     <button id="upgrade-handle" disabled title="목재 12 / 24 / 36개로 강화. 단계마다 도끼의 나무 피해 +15%. 몬스터 피해는 동일해요.">T 손잡이 강화 · 목재 12</button>
     <small id="lumber-hint">나무도 1~5 기술로 벨 수 있어요</small>
+    <div class="block-wallet"><span>건축 블록</span><strong id="block-counts">나무 0 · 돌 0 · 지붕 0</strong></div>
   </section>
   <div id="target-info" hidden><span id="target-name"></span><span id="target-health"></span><span id="target-opening" hidden>비틀거림 · 다음 적중 2배</span></div>
   <div id="crosshair" aria-hidden="true" hidden></div>
@@ -84,14 +85,18 @@
   </div>
   <dialog id="trade-dialog" aria-labelledby="resident-name" aria-describedby="resident-hello">
     <div class="resident-heading"><div id="resident-portrait" aria-hidden="true">미</div><div><span id="resident-role">목재 상인</span><h2 id="resident-name">미라</h2></div><button id="close-trade" class="icon-button" aria-label="대화 닫기">×</button></div>
-    <p id="resident-hello"></p><div id="trade-inventory"></div><div id="trade-offers"></div><p id="trade-message" role="status" aria-live="polite"></p>
+    <p id="resident-hello"></p><div id="trade-inventory"></div><div id="trade-blocks"></div>
+    <div id="trade-tabs" hidden role="group" aria-label="자재 거래 종류"><button id="trade-buy" aria-pressed="true">구매</button><button id="trade-sell" aria-pressed="false">판매</button><button id="trade-barter" aria-pressed="false">물물교환</button></div>
+    <p id="block-storage-note" hidden>블록은 지금 거래·보관할 수 있어요. 직접 설치하는 건축 기능은 준비 중입니다.</p>
+    <div id="trade-offers"></div><p id="trade-message" role="status" aria-live="polite"></p>
     <div class="trade-footer"><span>솔바람 마을 · 대화 중에는 시간이 멈춰요</span><span>Esc 닫기</span></div>
   </dialog>
   <dialog id="help-dialog" aria-labelledby="help-title">
     <div class="dialog-heading"><h2 id="help-title">들판에서 살아남기</h2><button id="close-help" class="icon-button" aria-label="조작법 닫기">×</button></div>
-    <p><strong>B · 솔바람 마을</strong><br>서쪽 문이 있는 작은 마을에 집 다섯 채와 주민 여섯 명이 있어요. 가까운 주민에게 <strong>E</strong>를 누르거나 대화 버튼을 눌러 보세요. 주민 근처에서 E는 대화, 그 밖에서는 시점 회전입니다. 대화 중에는 게임이 잠시 멈추고, 마을 안에서는 공격이 나가지 않아요. B로 이동하려면 동작을 마치고, 슬라임에게서 8m 이상 떨어져 6초 동안 피해를 받지 않아야 해요.</p>
+    <p><strong>B · 솔바람 마을</strong><br>서쪽 문이 있는 작은 마을에 집 다섯 채와 주민 일곱 명이 있어요. 가까운 주민에게 <strong>E</strong>를 누르거나 대화 버튼을 눌러 보세요. 주민 근처에서 E는 대화, 그 밖에서는 시점 회전입니다. 대화 중에는 게임이 잠시 멈추고, 마을 안에서는 공격이 나가지 않아요. B로 이동하려면 동작을 마치고, 슬라임에게서 8m 이상 떨어져 6초 동안 피해를 받지 않아야 해요.</p>
     <p><strong>사냥과 벌목으로 거래하기</strong><br>토끼는 3 골드, 슬라임은 5 골드를 줘요. 목재 상인 미라는 목재를 2 골드에 사고 4 골드에 팔아요. 약초상 나리에게 12 골드로 물약을 사면 <strong>H</strong>로 체력 45를 회복할 수 있어요. 대장장이 도윤은 20 / 35 / 50 골드로 갑옷을 보강해 단계마다 받는 피해를 2씩 줄여 줘요. 여관 주인 보리에게 5 골드를 내면 체력을 전부 회복합니다.</p>
-    <p>처음 시작할 때 20 골드와 물약 1개를 받아요. 골드·목재·물약·갑옷·손잡이 강화는 <strong>이 브라우저에 자동 저장</strong>되어 새로고침해도 유지됩니다. 다른 브라우저와는 공유되지 않고, 사이트 데이터를 지우면 초기화돼요. 저장이 차단된 브라우저에서는 이번 플레이 동안 유지됩니다.</p>
+    <p><strong>건축 자재상 호두 · 구매·판매·물물교환</strong><br>여관 옆의 작은 집 앞에서 나무·돌·지붕 블록을 5개씩 살 수 있어요. 가격은 각각 10 / 15 / 20 골드이며, 5개씩 팔면 5 / 5 / 10 골드를 받아요. 목재 2개를 나무 블록 5개로 교환할 수도 있어요. 채집 대신 사냥 보상으로 자재를 사도 됩니다. 현재는 거래·보관까지 가능하며 직접 설치·회수와 제작은 후속 기능입니다.</p>
+    <p>처음 시작할 때 20 골드와 물약 1개를 받아요. 골드·목재·물약·갑옷·손잡이 강화·건축 블록은 <strong>이 브라우저에 자동 저장</strong>되어 새로고침해도 유지됩니다. 다른 브라우저와는 공유되지 않고, 사이트 데이터를 지우면 초기화돼요. 저장이 차단된 브라우저에서는 이번 플레이 동안 유지됩니다.</p>
     <p><strong>벌목 · 같은 공격, 새로운 보상</strong><br>나무를 향해 기본 공격이나 1~5 기술을 쓰세요. 줄기가 흔들리고 금이 가다가 체력이 다하면 쓰러져요. 날아차기는 나무에 균열을 내서 4초 안의 다음 적중을 2배로 만들어요. 나무 적중도 4연계와 회전베기 강화에 인정됩니다. 뿌리박힌 나무는 밀리거나 끌려오지 않아요.</p>
     <p>작은 나무는 <strong>목재 4개</strong>, 굵은 나무는 <strong>6개</strong>를 떨어뜨려요. 치명타로 마지막 일격을 넣으면 <strong>2개 추가</strong>! 3m 안의 목재는 자동으로 줍고, 2단계 회전베기는 6m 안의 목재도 끌어모아요. 칼과 활로도 벨 수 있지만 나무 피해는 절반이에요. 베어낸 나무는 60초 뒤, 주변에 아무도 없으면 다시 자라요.</p>
     <p><strong>T · 손잡이 강화</strong><br>목재 12 / 24 / 36개로 세 번 강화해요. 단계마다 도끼의 벌목 피해 +15%, 최대 +45%입니다. 목재와 강화는 사망·R·새로고침에도 유지돼요.</p>

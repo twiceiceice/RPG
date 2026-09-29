@@ -7,7 +7,7 @@ import { WARRIOR_SKILLS } from './warrior.js';
 import { WarriorView } from './warrior-view.js';
 import { ForestryView } from './forestry-view.js';
 import { Village } from './village.js';
-import { VILLAGE } from './village-data.js';
+import { VILLAGE, BUILDING_BLOCKS } from './village-data.js';
 import { createVillageScenery, VillageView } from './village-view.js';
 
 const $ = id => document.getElementById(id);
@@ -54,7 +54,7 @@ const floatingHits = [];
 let woodReceipt = null;
 let hitFeedback = 0;
 let cameraShake = 0, impactPause = 0;
-let talkingTo=null;
+let talkingTo=null,tradeCategory='buy';
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 function notify(message) {
@@ -158,14 +158,19 @@ function usePotion() {
 }
 function renderTrade(message='') {
   const npc=village.residents.find(n=>n.id===talkingTo);if(!npc)return;
+  $('trade-dialog').classList.toggle('building-shop',npc.id==='hodu');
   const focusedOffer=document.activeElement?.dataset.offer;
   $('resident-name').textContent=npc.name;$('resident-role').textContent=npc.role;$('resident-hello').textContent=npc.hello;
   $('resident-portrait').textContent=npc.name.slice(0,1);$('resident-portrait').style.setProperty('--resident-color',`#${npc.color.toString(16).padStart(6,'0')}`);
   $('trade-inventory').textContent=`${village.gold} 골드 · 목재 ${forestry.wood} · 물약 ${village.potions} · 갑옷 ${village.armorLevel}/3`;
+  $('trade-blocks').textContent='건축 블록 · '+Object.entries(BUILDING_BLOCKS).map(([k,b])=>`${b.short} ${village.blocks[k]}`).join(' · ');
+  $('trade-tabs').hidden=npc.id!=='hodu';$('block-storage-note').hidden=npc.id!=='hodu';
+  for(const tab of ['buy','sell','barter'])$('trade-'+tab).setAttribute('aria-pressed',String(tab===tradeCategory));
   const list=$('trade-offers');list.replaceChildren();
   for(const offer of village.offers(npc.id)) {
+    if(npc.id==='hodu'&&offer.category!==tradeCategory)continue;
     const row=document.createElement('div');row.className='trade-offer';
-    const icon=document.createElement('span');icon.className=`offer-icon ${offer.icon}`;icon.textContent={wood:'▰',potion:'✚',armor:'◇',rest:'☕'}[offer.icon];icon.setAttribute('aria-hidden','true');
+    const icon=document.createElement('span');icon.className=`offer-icon ${offer.icon}`;icon.textContent={wood:'▰',potion:'✚',armor:'◇',rest:'☕',timber:'▧',stone:'▦',roof:'▰'}[offer.icon];icon.setAttribute('aria-hidden','true');
     const details=document.createElement('div'),name=document.createElement('strong'),hint=document.createElement('span');name.textContent=offer.name;hint.textContent=offer.detail;details.append(name,hint);
     const button=document.createElement('button');button.dataset.offer=offer.id;button.textContent=offer.price;button.disabled=!offer.enabled;button.title=offer.enabled?offer.name:offer.reason;button.setAttribute('aria-label',`${offer.name} · ${offer.price}`);button.addEventListener('click',()=>tradeWithResident(offer.id));
     row.append(icon,details,button);list.append(row);
@@ -178,11 +183,11 @@ function renderTrade(message='') {
 function openResident(id=village.nearest(player)?.id) {
   const reason=!started||paused?'플레이를 이어 간 뒤 주민에게 말을 걸어 주세요.':village.interactionReason(id,player);
   if(reason){notify(reason);return {accepted:false,reason};}
-  talkingTo=id;renderTrade();$('trade-dialog').showModal();setPaused(true);$('interact-prompt').hidden=true;return {accepted:true};
+  talkingTo=id;tradeCategory='buy';renderTrade();$('trade-dialog').showModal();setPaused(true);$('interact-prompt').hidden=true;return {accepted:true};
 }
 function tradeWithResident(offerId) {
   if(!$('trade-dialog').open||!talkingTo)return {accepted:false,reason:'먼저 가까운 상인과 대화해 주세요.'};
-  const result=village.trade(talkingTo,offerId,player);renderTrade(result.message??result.reason);updateHUD();return result;
+  const result=village.trade(talkingTo,offerId,player);if(talkingTo==='hodu'){const offer=village.offers(talkingTo).find(o=>o.id===offerId);if(offer)tradeCategory=offer.category;}renderTrade(result.message??result.reason);updateHUD();return result;
 }
 function beginBowDraw(owner) {
   if (!started || paused || village.isSafe(player) || drawOwner || !hunting.beginDraw()) return false;
@@ -216,6 +221,7 @@ $('village-start').addEventListener('click',travelToVillage);
 $('potion-button').addEventListener('click',()=>{usePotion();world.focus({preventScroll:true});});
 $('interact-prompt').addEventListener('click',()=>openResident());
 $('close-trade').addEventListener('click',()=>$('trade-dialog').close());
+for(const category of ['buy','sell','barter'])$('trade-'+category).addEventListener('click',()=>{tradeCategory=category;renderTrade();});
 $('trade-dialog').addEventListener('close',()=>{talkingTo=null;setPaused(document.hidden||!document.hasFocus());updateHUD();world.focus({preventScroll:true});});
 $('resume-button').addEventListener('click', play);
 $('view-button').addEventListener('click', () => { setView(firstPerson ? 'third' : 'first'); world.focus(); });
@@ -461,7 +467,7 @@ function updateHUD() {
   $('village-status').textContent=safe?'솔바람 마을 · 안전 지역':`솔바람 마을 ${Math.round(Math.hypot(player.x-VILLAGE.entry.x,player.z-VILLAGE.entry.z))}m · B 이동`;
   $('village-status').classList.toggle('safe',safe);
   $('interact-prompt').hidden=!started||paused||!near||hunting.hp<=0;
-  if(near)$('interact-label').textContent=`${near.name} · ${near.role}${near.shop?'과 거래하기':'과 대화하기'}`;
+  if(near)$('interact-label').textContent=`${near.name} · ${near.shop?'거래하기':'대화하기'}`;
   $('coordinates').textContent = `${player.x.toFixed(0)} / ${(-player.z).toFixed(0)}`;
   const speed = Math.hypot(player.vx, player.vz);
   $('motion-state').textContent = paused && started ? '잠시 쉬는 중' : !player.grounded ? (player.vy > 0 ? '뛰어오르는 중' : '내려오는 중') : speed > 6 ? '달리는 중' : speed > .2 ? '걷는 중' : '가만히 서 있는 중';
@@ -475,6 +481,7 @@ function updateHUD() {
   $('auto-attack-status').classList.toggle('attacking',melee&&automatic&&!paused);
   if(safe)$('auto-attack-status').textContent='안전 지역 · 무기를 쉬게 해요';
   $('wood-count').textContent=forestry.wood;
+  $('block-counts').textContent=Object.entries(BUILDING_BLOCKS).map(([k,b])=>`${b.short} ${village.blocks[k]}`).join(' · ');
   $('handle-state').textContent=`벌목 +${Math.round(forestry.bonus*100)}% · ${forestry.level}/3`;
   $('upgrade-handle').disabled=!started||hunting.hp<=0||forestry.cost===null||forestry.wood<forestry.cost;
   $('upgrade-handle').textContent=forestry.cost===null?'손잡이 강화 완료':`T 손잡이 강화 · 목재 ${forestry.cost}`;
