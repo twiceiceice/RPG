@@ -104,7 +104,7 @@ export function createEnvironment(scene) {
     const nearPath = Math.abs(x - Math.sin(z * .08) * 3.5) < 2.7;
     dummy.position.set(x, terrainHeight(x, z) + .16, z);
     dummy.rotation.set(0, random() * 6, (random() - .5) * .2);
-    dummy.scale.setScalar(inVillage(x,z,1) ? 0 : nearPath ? .08 : .7 + random() * .8); dummy.updateMatrix(); blades.setMatrixAt(i, dummy.matrix);
+    dummy.scale.setScalar(inVillage(x,z,1)||raidClearance(x,z) ? 0 : nearPath ? .08 : .7 + random() * .8); dummy.updateMatrix(); blades.setMatrixAt(i, dummy.matrix);
   }
   blades.receiveShadow = true; scene.add(blades);
   const flowerGeometry = new THREE.IcosahedronGeometry(.105, 0);
@@ -112,7 +112,7 @@ export function createEnvironment(scene) {
     const flowers = new THREE.InstancedMesh(flowerGeometry, mat(color), count);
     for (let i = 0; i < count; i++) {
       const x = (random() - .5) * 70, z = (random() - .5) * 65;
-      dummy.position.set(x, terrainHeight(x, z) + .23, z); dummy.rotation.set(0, random() * 6, 0); dummy.scale.set(1, .7, 1);if(inVillage(x,z,1))dummy.scale.setScalar(0);dummy.updateMatrix();flowers.setMatrixAt(i, dummy.matrix);
+      dummy.position.set(x, terrainHeight(x, z) + .23, z); dummy.rotation.set(0, random() * 6, 0); dummy.scale.set(1, .7, 1);if(inVillage(x,z,1)||raidClearance(x,z))dummy.scale.setScalar(0);dummy.updateMatrix();flowers.setMatrixAt(i, dummy.matrix);
     }
     scene.add(flowers);
   }

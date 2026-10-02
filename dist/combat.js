@@ -74,12 +74,14 @@ export class Hunting {
     this.meleeCooldown=0;
     for(const tree of this.forestry.trees){tree.offBalance=0;tree.flash=0;}
   }
-  targets() { return this.entities.concat(this.forestry.trees); }
+  targets() { return this.entities.filter(e=>!e.mirrorVeiled).concat(this.forestry.trees); }
   unobstructed(a,b,ignore=null) { return !this.colliders.some(box=>{if(box===ignore||box.active===false)return false;const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
   damageEntity(e,damage,dx,dz,context={}) {
     damage=this.talentDamage(e,damage,context);
     if(e.kind==='tree')return this.forestry.damage(e,damage,dx,dz,context);
     if(!e.alive||damage<=0)return;
+    if(e.mirrorProjection)return this.raids?.boss.hitProjection?.(e,damage)??{damage:0,critical:false,killed:false};
+    if(e.mirrorVeiled)return {damage:0,critical:false,killed:false};
     if(e.dodge&&e.dodge.elapsed<BATTLE.evade.invulnerable)return {damage:0,critical:false,killed:false,evaded:true};
     if(e.raider){
       if(context.source==='kick'){if(e.boss)this.raids?.boss.interrupt(e);else{e.guardBroken=4;this.events.push({type:'guard-break',x:e.x,y:e.y+2,z:e.z});}}
@@ -162,7 +164,7 @@ export class Hunting {
     let target=null,nearest=Infinity;
     // Only creatures initiate auto attack; passing a tree never starts logging.
     for(const e of this.entities) {
-      if(!e.alive)continue;
+      if(!e.alive||e.mirrorVeiled)continue;
       const distance=Math.hypot(e.x-player.x,e.z-player.z);
       const centerY=e.y+e.hop+e.height*.5;
       const inHeight=this.weapon==='axe'?Math.abs(e.y+e.hop-player.y)<=1.7:Math.abs(centerY-player.y-1)<=1.45;
@@ -222,7 +224,7 @@ export class Hunting {
     for(const e of this.entities){e.offBalance=Math.max(0,e.offBalance-dt);e.guardBroken=Math.max(0,(e.guardBroken??0)-dt);}
     this.warrior.update(dt,player);
     this.forestry.update(dt,player);
-    if(this.hp>0&&this.sinceHit>6)this.hp=Math.min(this.maxHp,this.hp+4*dt);
+    if(this.hp>0&&this.sinceHit>6&&!(this.raids?.active&&this.raids.mode==='field'))this.hp=Math.min(this.maxHp,this.hp+4*dt);
     for(const e of this.entities) {
       e.flash=Math.max(0,e.flash-dt);e.recovery=Math.max(0,e.recovery-dt);
       if(!e.alive){
@@ -293,8 +295,8 @@ export class Hunting {
       const ground=terrainHeight(next.x,next.z);
       if(next.y<=ground){const t=clamp((old.y-ground)/(old.y-next.y||1),0,1);if(t<=nearest){nearest=t;blocked=true;hit=null;}}
       for(const e of this.entities){
-        if(!e.alive)continue;
-        const t=segmentSphere(old,next,{x:e.x,y:e.y+e.hop+e.height*.5,z:e.z},e.kind==='rabbit'?.48:.78);
+        if(!e.alive||e.mirrorVeiled)continue;
+        const t=segmentSphere(old,next,{x:e.x,y:e.y+e.hop+e.height*.5,z:e.z},e.fieldBoss?e.radius:e.kind==='rabbit'?.48:.78);
         if(t!==null&&t<nearest){nearest=t;hit=e;blocked=false;}
       }
       arrow.x=old.x+(next.x-old.x)*nearest;arrow.y=old.y+(next.y-old.y)*nearest;arrow.z=old.z+(next.z-old.z)*nearest;

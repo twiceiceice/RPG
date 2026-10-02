@@ -1,6 +1,6 @@
 export const MAX_LEVEL=10;
 export const XP_STEPS=[60,100,150,210,280,360,450,550,660];
-export const XP_REWARDS={rabbit:12,slime:24,tree:18,raider:30,captain:150,defense:320,assault:420};
+export const XP_REWARDS={rabbit:12,slime:24,tree:18,raider:30,captain:150,defense:320,assault:420,fieldQuest:180};
 export const TALENT_BRANCHES=[{id:'arms',name:'힘찬 일격',detail:'한 번의 공격을 더 묵직하게',color:'#efb16d'},{id:'defense',name:'든든한 전사',detail:'오래 버티며 마을을 지켜요',color:'#8ac5b4'},{id:'storm',name:'바람의 춤',detail:'연계를 이어 회전베기를 강화',color:'#b9b0ef'}];
 export const TALENTS=[
   {id:'power',branch:'arms',row:0,name:'단단한 손아귀',icon:'✦',max:2,level:1,description:'모든 공격 피해 +6% / +12%'},

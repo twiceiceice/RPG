@@ -123,7 +123,8 @@ export class VillageView {
       const distance=Math.hypot(n.x-player.x,n.z-player.z),cameraDistance=Math.hypot(n.x-this.camera.position.x,n.y+2.63-this.camera.position.y,n.z-this.camera.position.z);
       // Keep nearby nameplates readable without covering the character or square.
       const size=cameraDistance*.18*720/window.innerHeight;a.title.scale.set(size,size*132/384,1);
-      a.title.visible=distance<26&&cameraDistance>2;a.title.material.opacity=Math.min(1,(26-distance)/6);
+      a.title.visible=!n.battle&&distance<26&&cameraDistance>2;a.title.material.opacity=Math.min(1,(26-distance)/6);
+      a.body.rotation.z=n.battle&&!n.alive?Math.PI/2:0;
     }
   }
 }

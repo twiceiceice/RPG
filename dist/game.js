@@ -9,8 +9,10 @@ import { ForestryView } from './forestry-view.js';
 import { Village } from './village.js';
 import { VILLAGE, BUILDING_BLOCKS, BUILD_PLOTS, plotAt } from './village-data.js';
 import { createVillageScenery, VillageView } from './village-view.js';
-import { Raids } from './raids.js';
-import { createRaidScenery, RaidView } from './raid-view.js';
+import { FieldHunt } from './field-hunt.js';
+import { createFieldScenery, FieldHuntView } from './field-view.js';
+import { HUNTS } from './field-data.js';
+import {createMirrorScenery,MirrorHuntView} from './mirror-view.js';
 import { TALENTS, TALENT_BRANCHES } from './progression.js';
 import { GameAudio } from './audio.js';
 import { Building } from './building.js';
@@ -37,7 +39,8 @@ const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(57, innerWidth / innerHeight, .08, 220);
 const environment = createEnvironment(scene);
 createVillageScenery(scene,environment);
-const raidScenery=createRaidScenery(scene,environment);
+const raidScenery=createFieldScenery(scene);
+const mirrorScenery=createMirrorScenery(scene,environment);
 const avatar = createAvatar(scene);
 const player = new Movement(environment.colliders);
 const hunting = new Hunting(environment.colliders, environment.trees);
@@ -51,8 +54,9 @@ const buildingView=new BuildingView(scene,camera,environment,building);
 const villageView=new VillageView(scene,camera,village);
 const forestryView = new ForestryView(scene,camera,forestry,environment.trees);
 const huntingView = new HuntingView(scene, camera, avatar, hunting, environment);
-const raids=new Raids(hunting,village);
-const raidView=new RaidView(scene,camera,raids,villageView,huntingView,raidScenery);
+const raids=new FieldHunt(hunting,village);
+const raidView=new FieldHuntView(scene,raids,huntingView,raidScenery);
+const mirrorView=new MirrorHuntView(scene,raids,huntingView,mirrorScenery);
 const warrior = hunting.warrior;
 const warriorView = new WarriorView(scene, camera, avatar, warrior);
 const battleAura=new THREE.Mesh(new THREE.RingGeometry(.8,1,48),new THREE.MeshBasicMaterial({color:0xffc363,transparent:true,opacity:.6,side:THREE.DoubleSide,depthWrite:false}));battleAura.rotation.x=-Math.PI/2;battleAura.visible=false;scene.add(battleAura);
@@ -247,30 +251,64 @@ function travelToVillage() {
   started=true;setPaused(false);$('welcome').hidden=true;$('crosshair').hidden=false;
   yaw=-.42;pitch=.34;cameraDistance=9;avatar.root.rotation.y=Math.PI-.42;
   updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});void lockMouse();
-  notify('솔바람 마을 · 가까운 주민에게 E로 대화해 보세요.');return {accepted:true};
+  notify('솔바람 마을 · J 토벌 의뢰 · 가까운 주민에게 E 대화');return {accepted:true};
 }
 function usePotion() {
   const result=!started||paused?{accepted:false,reason:'플레이를 이어 간 뒤 물약을 사용해 주세요.'}:village.usePotion();
   notify(result.message??result.reason);updateHUD();return result;
 }
+function selectHunt(id){
+  if(!$('battle-dialog').open)return {accepted:false,reason:'J 토벌 의뢰를 먼저 열어 주세요.'};
+  const result=raids.select(id);if(!result.accepted)notify(result.reason);renderBattle();updateHUD();return result;
+}
 function renderBattle(){
-  for(const mode of ['defense','assault'])$('start-'+mode).disabled=!!raids.startReason(mode,player);
+  const q=raids.quest,a=raids.arena;
+  for(const button of document.querySelectorAll('[data-hunt]')){button.disabled=raids.active;button.setAttribute('aria-pressed',String(button.dataset.hunt===raids.selected));}
+  $('battle-dialog').classList.toggle('mirror-journal',raids.selected==='lysea');
+  $('battle-title').textContent=a.title;$('hunt-intro').textContent=a.intro;
+  $('quest-status').textContent=q.rewardClaimed?`조사 완료 · 누적 ${q.clears}회 토벌${q.bestTime?` · 최고 ${Math.floor(q.bestTime/60)}분 ${Math.floor(q.bestTime%60)}초`:''}`:q.clears?`${a.shortName} 토벌 완료 · 마을에 보고하세요`:q.accepted?`진행 중 · ${a.name}의 ${a.shortName} 토벌`:'새 의뢰 · '+a.questTitle;
+  $('accept-hunt').hidden=q.accepted;$('accept-hunt').disabled=!village.isSafe(player)||hunting.hp<=0;
+  $('travel-hunt').textContent=a.travelLabel;$('travel-hunt').disabled=!!raids.travelReason(player);
+  $('start-hunt').textContent=a.startLabel;$('start-hunt').disabled=!!raids.startReason('field',player);
+  $('claim-hunt').hidden=!q.clears||q.rewardClaimed;$('claim-hunt').disabled=!!raids.claimReason(player);$('hunt-companion').disabled=raids.active;
+  const reward=a.firstReward;$('hunt-first-reward').textContent=`${reward.gold} 골드 · 나무 ${reward.timber} · 돌 ${reward.stone} · 지붕 ${reward.roof} · 180 XP`;
+  $('hunt-repeat-reward').textContent=`${a.shortName} 처치마다 150 XP · 두 번째부터 ${a.repeatReward.gold} 골드와 돌 ${a.repeatReward.stone}개`;
+  $('hunt-guide-title').textContent='공략 수첩 · '+a.guideTitle;const guide=$('hunt-guide-list');guide.replaceChildren();
+  for(const [name,description] of a.guide){const item=document.createElement('li'),label=document.createElement('strong');label.textContent=name;item.append(label,document.createTextNode(' — '+description));guide.append(item);}
+  $('hunt-footnote').textContent=(raids.selected==='lysea'?'분신은 경험치를 주지 않으며 발차기로 무도회를 건너뛸 수 없어요. 진짜를 놓쳐도 기둥 뒤에서 마지막 응시를 피하고 다시 도전할 수 있어요. 마지막 단계에는 광선이 두 줄로 늘어납니다.':'공명석을 놓쳐도 다시 기회가 옵니다. 마지막 단계에는 파동과 낙인이 겹칩니다.')+' 체력 65%·35%에 패턴 강화. 전장을 크게 벗어나면 토벌 종료. 두 의뢰의 첫 보상은 각각 한 번, 주간 대기 없이 반복 도전할 수 있어요.';
   const r=raids.result;$('battle-result').hidden=!r;
-  if(r)$('battle-result').textContent=(r.won?`${r.mode==='defense'?'방어 성공':'야영지 정리 완료'} · +${r.reward.gold} 골드 · ${Object.entries(r.reward).filter(([k,v])=>k!=='gold'&&v).map(([k,v])=>({timber:'나무',stone:'돌',roof:'지붕'}[k]+' '+v)).join(' · ')} 블록`:`전투 종료 · ${r.reason} 주민들은 모두 회복했어요.`)+(r.bossStats?` · 나팔 차단 ${r.bossStats.interrupts}회 · 바닥 피격 ${r.bossStats.playerHits}회`:'');
-  $('battle-reason').textContent=raids.active?'전투 진행 중 · 메뉴를 닫으면 계속됩니다.':raids.startReason('defense',player)??`준비 완료 · 방어 ${village.raidWins.defense}승 / 출정 ${village.raidWins.assault}승 · 시작하면 8초간 준비해요.`;
-  $('retreat-button').hidden=!raids.active;
+  if(r){const mechanics=raids.selected==='lysea'?`진짜 발견 ${r.bossStats.mirrorBreaks}회 · 엄폐 ${r.bossStats.coverSuccess}회`:`공명석 파괴 ${r.bossStats.stoneBreaks}회`;
+    $('battle-result').textContent=(r.won?`토벌 성공 · ${Math.floor(r.elapsed/60)}분 ${Math.floor(r.elapsed%60)}초 · ${r.first?'마을에서 첫 의뢰 보상을 받으세요':r.reward.gold+' 골드 · 돌 '+r.reward.stone+'개'}`:r.reason)+` · ${mechanics} · 피격 ${r.bossStats.playerHits}회`;}
+  $('battle-reason').textContent=raids.active?'토벌 진행 중 · 메뉴를 닫으면 계속됩니다.':!q.accepted?'마을에서 선택한 의뢰를 받은 뒤 이동하세요.':q.clears&&!q.rewardClaimed?'마을로 돌아가 첫 의뢰 보상을 받아 주세요.':raids.startReason('field',player)??'준비 완료 · '+a.startLabel;
+  $('retreat-button').hidden=false;$('retreat-button').disabled=hunting.hp<=0;$('retreat-button').textContent=raids.active?'토벌 중단 · 마을로 철수':'마을로 돌아가기';
 }
 function openBattle(){
   if(menuOpen())return {accepted:false,reason:'열린 메뉴를 먼저 닫아 주세요.'};
+  const nearby=raids.nearestArena(player);if(!raids.active&&Math.hypot(player.x-nearby.x,player.z-nearby.z)<=nearby.radius)raids.select(nearby.id);
   renderBattle();if(!$('battle-dialog').open)$('battle-dialog').showModal();setPaused(true);return {accepted:true};
 }
-function startBattle(mode){
-  if(!$('battle-dialog').open)return {accepted:false,reason:'J 전투 메뉴를 먼저 열어 주세요.'};
-  const result=raids.start(mode,player);if(!result.accepted){notify(result.reason);renderBattle();return result;}
+function startBattle(mode='field'){
+  if(!$('battle-dialog').open)return {accepted:false,reason:'J 토벌 의뢰를 먼저 열어 주세요.'};
+  const result=raids.start(mode,player,$('hunt-companion').value||'none');if(!result.accepted){notify(result.reason);renderBattle();return result;}
   if(buildingMode)toggleBuild(false);
   started=true;$('welcome').hidden=true;$('crosshair').hidden=false;$('battle-dialog').close();setPaused(false);
-  yaw=Math.PI/2;pitch=.34;cameraDistance=10;avatar.root.rotation.y=-Math.PI/2;impactPause=0;
+  yaw=Math.PI/2;pitch=raids.selected==='lysea'?.28:.52;cameraDistance=raids.selected==='lysea'?14.5:12;avatar.root.rotation.y=-Math.PI/2;impactPause=0;
   updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});void lockMouse();return result;
+}
+function questAction(action){
+  if(!$('battle-dialog').open)return {accepted:false,reason:'J 토벌 의뢰를 먼저 열어 주세요.'};
+  const result=action==='accept'?raids.acceptQuest(player):raids.claimReward(player);notify(result.message??result.reason);renderBattle();updateHUD();return result;
+}
+function travelToHunt(){
+  const reason=!$('battle-dialog').open?'J 토벌 의뢰를 먼저 열어 주세요.':raids.travelReason(player);
+  if(reason){notify(reason);return {accepted:false,reason};}
+  if(buildingMode)toggleBuild(false);
+  const area=raids.arena;
+  Object.assign(player,{x:area.entry.x,z:area.entry.z,y:terrainHeight(area.entry.x,area.entry.z),vx:0,vz:0,vy:0,grounded:true,jumpBuffer:0});
+  hunting.inSanctuary=false;hunting.autoMelee.targetId=null;started=true;$('welcome').hidden=true;$('crosshair').hidden=false;
+  yaw=Math.PI/2;pitch=raids.selected==='lysea'?.28:.48;cameraDistance=raids.selected==='lysea'?14.5:12;avatar.root.rotation.y=-Math.PI/2;
+  $('battle-dialog').close();setPaused(false);updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});void lockMouse();
+  notify(raids.arena.name+' · J 의뢰에서 '+raids.arena.startLabel+' · F 회피');return {accepted:true};
 }
 function rallyResidents(){
   const result=!started||paused?{accepted:false,reason:'플레이를 이어 가 주세요.'}:raids.toggleOrder();notify(result.message??result.reason);updateHUD();return result;
@@ -278,16 +316,16 @@ function rallyResidents(){
 function updateRaidHUD(){
   $('raid-hud').hidden=!raids.active;document.body.classList.toggle('raid-active',raids.active);
   const boss=raids.boss.state();$('boss-hud').hidden=!raids.active||!boss;document.body.classList.toggle('boss-active',raids.active&&!!boss);
-  if(boss){$('boss-name').textContent=boss.name;$('boss-phase').textContent=`${boss.phase}단계${boss.enraged?' · 격노':''}`;$('boss-health').max=boss.maxHp;$('boss-health').value=boss.health;$('boss-health-text').textContent=`${boss.health} / ${boss.maxHp}`;
-    $('boss-cast-name').textContent=boss.cast?.name??(boss.exposed>0?'나팔 차단 · 공격 기회':'다음 공격 준비');$('boss-cast-time').textContent=boss.cast?`${boss.cast.remaining.toFixed(1)}초`:boss.exposed>0?`${boss.exposed.toFixed(1)}초`:'';$('boss-cast').value=boss.cast?.progress??0;
-    $('boss-hud').classList.toggle('interruptible',boss.cast?.id==='horn');$('boss-hint').textContent=boss.cast?.hint??(boss.exposed>0?'지금 6 전투 함성! 보스가 받는 피해 +40%':'붉은 바닥은 위험 · F 회피 · 나팔은 2 → 3으로 차단');}
+  const nearby=raids.nearestArena(player);$('hunt-prompt').hidden=!started||raids.active||menuOpen()||hunting.hp<=0||Math.hypot(player.x-nearby.x,player.z-nearby.z)>nearby.radius;
+  $('hunt-prompt').textContent='J '+nearby.bossName+' · 토벌 준비 →';document.body.classList.toggle('mirror-active',raids.active&&raids.selected==='lysea');
+  if(boss){$('boss-name').textContent=boss.name;$('boss-phase').textContent=`${boss.phase}단계`;$('boss-health').max=boss.maxHp;$('boss-health').value=boss.health;$('boss-health-text').textContent=`${boss.health} / ${boss.maxHp}`;
+    $('boss-cast-name').textContent=boss.cast?.name??(boss.exposed>0?(raids.selected==='lysea'?'진짜 발견 · 본체 노출':'공명석 파괴 · 약점 노출'):'숨 고르기 · 공격 기회');$('boss-cast-time').textContent=boss.cast?`${boss.cast.remaining.toFixed(1)}초`:boss.exposed>0?`${boss.exposed.toFixed(1)}초`:'';$('boss-cast').value=boss.cast?.progress??(boss.exposed/raids.arena.exposure);
+    $('boss-hud').classList.toggle('interruptible',boss.exposed>0);$('boss-hint').textContent=boss.cast?.hint??(boss.exposed>0?'6 함성 → 1~4 연계 → 5 회전베기 · 받는 피해 +40%':raids.selected==='lysea'?'기둥 위치를 확인하며 공격 · 다음 주문에 대비하세요':'옆과 뒤에서 공격 · 다음 바닥 예고에 대비하세요');}
   if(!raids.active)return;
-  const s=raids.state();$('raid-mode').textContent=s.mode==='defense'?'솔바람 마을 방어':'붉은발 야영지 공격';$('raid-wave').textContent=`${s.wave} / ${s.totalWaves}차`;
-  $('raid-objective').textContent=s.phase==='preparing'?`전투 시작까지 ${Math.ceil(s.timer)}초 · 자리 잡기`:s.phase==='interval'?`다음 습격까지 ${Math.ceil(s.timer)}초`:`남은 적 ${s.remaining}명 · ${s.mode==='defense'?'수호 깃발을 지키세요':'대장과 부하를 처치하세요'}`;
-  $('beacon-status').hidden=s.mode!=='defense';$('beacon-health').value=s.beaconHp;$('beacon-value').textContent=s.beaconHp;
-  $('rally-button').textContent=s.order==='fight'?'G  내게 모이기':'G  다시 교전하기';$('rally-button').setAttribute('aria-pressed',String(s.order==='rally'));
-  const list=$('raid-allies');list.replaceChildren();
-  for(const a of s.allies){const row=document.createElement('div');row.className='raid-ally'+(a.alive?'':' down');const name=document.createElement('span');name.textContent=`${a.name} · ${a.avoiding?'바닥 회피':a.skills.skill?BATTLE[a.skills.skill].name:a.skills.battlecry>0?'함성':a.role}`;const hp=document.createElement('progress');hp.max=a.maxHp;hp.value=a.health;hp.setAttribute('aria-label',`${a.name} 체력 ${a.health}/${a.maxHp}`);const status=document.createElement('small');status.textContent=a.alive?(a.retreating?'후퇴':`${a.health}`):'쓰러짐';row.append(name,hp,status);list.append(row);}
+  $('raid-mode').textContent=raids.arena.name+' · 야외 토벌';$('raid-wave').textContent=`${Math.floor(raids.elapsed/60)}:${String(Math.floor(raids.elapsed%60)).padStart(2,'0')}`;
+  $('raid-objective').textContent=raids.selected==='lysea'?`진짜 발견 ${boss?.stats.mirrorBreaks??0}회 · 엄폐 ${boss?.stats.coverSuccess??0}회`:`공명석 ${boss?.stats.stoneBreaks??0}회 파괴 · 자동 회복 없음`;
+  const a=raids.allies[0];$('raid-allies').textContent=a?(a.alive?`나리 · 체력 ${Math.ceil(a.hp)} · 치유 ${a.healCharges}/3회 남음`:'나리 휴식 중 · 혼자서도 계속할 수 있어요'):'단독 토벌 · F 회피 / H 물약';
+  $('rally-button').hidden=!a;$('rally-button').textContent=raids.order==='fight'?'G 나리 집결':'G 나리 동행';
 }
 function renderTrade(message='') {
   const npc=village.residents.find(n=>n.id===talkingTo);if(!npc)return;
@@ -369,7 +407,12 @@ $('village-button').addEventListener('click',travelToVillage);
 $('village-start').addEventListener('click',travelToVillage);
 $('battle-button').addEventListener('click',openBattle);
 $('close-battle').addEventListener('click',()=>closeMenu('battle-dialog'));
-for(const mode of ['defense','assault'])$('start-'+mode).addEventListener('click',()=>startBattle(mode));
+$('start-hunt').addEventListener('click',()=>startBattle('field'));
+$('accept-hunt').addEventListener('click',()=>questAction('accept'));
+$('claim-hunt').addEventListener('click',()=>questAction('claim'));
+$('travel-hunt').addEventListener('click',travelToHunt);
+$('hunt-prompt').addEventListener('click',openBattle);
+for(const button of document.querySelectorAll('[data-hunt]'))button.addEventListener('click',()=>selectHunt(button.dataset.hunt));
 $('rally-button').addEventListener('click',()=>{rallyResidents();world.focus({preventScroll:true});});
 $('retreat-button').addEventListener('click',()=>{raids.abort();$('battle-dialog').close();hunting.sinceHit=100;hunting.warrior.cancel();travelToVillage();});
 $('potion-button').addEventListener('click',()=>{usePotion();world.focus({preventScroll:true});});
@@ -487,7 +530,7 @@ world.addEventListener('wheel', event => {
   event.preventDefault();
   if (firstPerson && event.deltaY > 0) { cameraDistance = 2.5; setView('third'); }
   else if (!firstPerson) {
-    cameraDistance = THREE.MathUtils.clamp(cameraDistance + event.deltaY * .008, 1.5, 13);
+    cameraDistance = THREE.MathUtils.clamp(cameraDistance + event.deltaY * .008, 1.5, 16);
     if (cameraDistance <= 1.5) setView('first');
   }
 }, { passive: false });
@@ -629,11 +672,12 @@ function updateHUD() {
   updateGrowthHUD();
   updateRaidHUD();
   const safe=village.isSafe(player),near=village.nearest(player);
-  $('place-name').textContent=raids.active?(raids.mode==='defense'?'솔바람 마을 · 교전 중':'붉은발 야영지'):safe?VILLAGE.name:'시작의 들판';
+  const nearby=raids.nearestArena(player);
+  $('place-name').textContent=Math.hypot(player.x-nearby.x,player.z-nearby.z)<nearby.leash?nearby.name:safe?VILLAGE.name:'시작의 들판';
   $('gold-count').textContent=village.gold;
   $('potion-button').textContent=village.potionCooldown>0?`물약 ${village.potionCooldown.toFixed(1)}초`:`H 물약 ${village.potions}`;
   $('potion-button').disabled=!started||paused||hunting.hp<=0||hunting.hp>=hunting.maxHp||village.potions<1||village.potionCooldown>0;
-  $('village-status').textContent=raids.active?'J 전투 메뉴 · G 주민 지시':safe?'솔바람 마을 · J 방어와 출정':`솔바람 마을 ${Math.round(Math.hypot(player.x-VILLAGE.entry.x,player.z-VILLAGE.entry.z))}m · B 이동`;
+  $('village-status').textContent=raids.active?'J 토벌 의뢰 · 전장을 벗어나면 전투 종료':safe?'솔바람 마을 · J 토벌 의뢰':`${nearby.name} ${Math.round(Math.hypot(player.x-nearby.x,player.z-nearby.z))}m · J 의뢰 / B 마을`;
   $('village-status').classList.toggle('safe',safe);
   $('interact-prompt').hidden=buildingMode||raids.active||!started||paused||!near||hunting.hp<=0;
   if(near)$('interact-label').textContent=`${near.name} · ${near.shop?'거래하기':'대화하기'}`;
@@ -662,8 +706,8 @@ function updateHUD() {
   if (target) { $('target-name').textContent = target.name??(target.kind==='tree'?(target.scale>=1.2?'굵은 소나무':'소나무'):target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]); $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; $('target-opening').textContent=`${target.kind==='tree'?'균열':'비틀거림'} · 다음 적중 ${hunting.criticalMultiplier}배`; }
   updateWarriorHUD();
   $('warrior-hud').hidden=buildingMode||safe;
-  $('soldier-hint').hidden=!target?.raider;
-  if(target?.raider){const role=SOLDIER_ROLES[soldierRole(target)];$('soldier-hint').textContent=target.battlecry>0?'전투 함성 중 · 강화가 끝날 때까지 거리 벌리기':target.guardBroken>0?'방패 무너짐 · 공격 기회!':`${role.name} · ${target.action?BATTLE[target.action.id].name+' 준비 · ':''}${role.hint}`;}
+  $('soldier-hint').hidden=!target?.raider||target.fieldBoss;
+  if(target?.raider&&!target.fieldBoss){const role=SOLDIER_ROLES[soldierRole(target)];$('soldier-hint').textContent=target.battlecry>0?'전투 함성 중 · 강화가 끝날 때까지 거리 벌리기':target.guardBroken>0?'방패 무너짐 · 공격 기회!':`${role.name} · ${target.action?BATTLE[target.action.id].name+' 준비 · ':''}${role.hint}`;}
   if(safe){$('combo-title').textContent='솔바람 마을 · 안전 지역';$('combo-hint').textContent='주민 가까이 E 대화 · H 물약 · 서쪽 문으로 들판';for(const s of WARRIOR_SKILLS)$('skill-'+s.id).classList.add('unavailable');}
 }
 function handleCombatEvents() {
@@ -673,7 +717,7 @@ function handleCombatEvents() {
     if(event.type==='guard-break'||event.type==='guard-block'){const el=document.createElement('span');el.className='damage-number guard-feedback';el.textContent=event.type==='guard-break'?'방패 무너짐':'정면 방어';$('combat-fx').appendChild(el);floatingHits.push({el,position:new THREE.Vector3(event.x,event.y,event.z),life:.65});}
     if(event.type==='xp-earned'){const el=document.createElement('span');el.className='damage-number xp-reward';el.textContent=`+${event.amount} XP`;$('combat-fx').appendChild(el);floatingHits.push({el,position:new THREE.Vector3(player.x+.6,player.y+2.6,player.z),life:1.1});}
     if(event.type==='level-up'){notify(`레벨 ${event.level}! 체력 회복 · P에서 특성 ${event.points}점 선택`);if($('talents-dialog').open)renderTalents();}
-    if(event.type==='raid-notice'||event.type==='boss-warning')notify(event.message);
+    if(event.type==='raid-notice'||(event.type==='boss-warning'&&['arrival','exposed','miss'].includes(event.pattern)))notify(event.message);
     else if(event.type==='boss-impact'){huntingView.particleBurst({...event,kind:'impact'});if(!reduceMotion)cameraShake=Math.max(cameraShake,.035);}
     else if(event.type==='raid-result'){notify(event.message);if(hunting.hp>0)openBattle();}
     else if(event.type==='ally-heal'||event.type==='ally-hit'){
@@ -748,7 +792,7 @@ function frame(milliseconds) {
       if (hunting.hp <= 0) break;
     }
   }
-  animateAvatar(dt, time); forestryView.update(player);villageView.update(player);updateCamera(dt);raidView.update();buildingView.update(buildingMode&&!paused,buildMaterial,player);
+  animateAvatar(dt, time); forestryView.update(player);villageView.update(player);updateCamera(dt);raidView.update(dt);mirrorView.update(dt);buildingView.update(buildingMode&&!paused,buildMaterial,player);
   handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); warriorView.update(dt, firstPerson, player, paused); combatFeedback(dt);
   battleAura.visible=hunting.tactics.battlecry>0&&hunting.hp>0;battleAura.position.set(player.x,player.y+.045,player.z);battleAura.scale.setScalar(1.4+Math.sin(hunting.time*8)*.08);
   if(hunting.tactics.dodge){const d=hunting.tactics.dodge;avatar.root.rotation.y=Math.atan2(d.dx,d.dz);if(!firstPerson){avatar.body.rotation.x=d.elapsed/BATTLE.evade.duration*Math.PI*2;avatar.body.position.y=.2;}}
@@ -800,8 +844,12 @@ if (modelContext?.registerTool) {
     {name:'travel_to_build_plot',title:'건축 부지로 이동',description:'Use the visible build panel plot selector and travel button. Requires build mode, no combat and closed dialogs.',inputSchema:{type:'object',properties:{plot:{type:'string',enum:BUILD_PLOTS.map(p=>p.id)}},required:['plot'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!buildingMode||!input||Object.keys(input).some(k=>k!=='plot'))throw new Error('Open build mode first.');const r=travelToPlot(input.plot);if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'place_aimed_block',title:'블록 설치',description:'Place one selected inventory block at the current green aim preview, matching left click. Checks plot limits, range, occupancy and support.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=buildAction();if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'recover_aimed_block',title:'블록 회수',description:'Recover the player-built block currently aimed at, returning exactly one block to inventory. Matches right click.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=buildAction(true);if(!r.accepted)throw new Error(r.reason);return state();}},
-    {name:'open_battle_menu',title:'방어와 출정 메뉴',description:'Open the visible J battle menu and pause the game. Battles start in the village.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=openBattle();if(!r.accepted)throw new Error(r.reason);return state();}},
-    {name:'start_village_battle',title:'방어 또는 출정 시작',description:'Use the open battle menu to start three waves: defense with ten residents against 38 enemies, or assault with seven volunteers against 29 enemies. The final wave has a floor-pattern boss; missed horn interrupts summon reinforcements. Requires village proximity, living player and no active attack. Moves everyone to staging, then gives eight preparation seconds. Matches the two battle menu buttons.',inputSchema:{type:'object',properties:{mode:{type:'string',enum:['defense','assault']}},required:['mode'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||!['defense','assault'].includes(input.mode)||Object.keys(input).some(k=>k!=='mode'))throw new Error('Choose defense or assault.');const r=startBattle(input.mode);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'open_hunt_journal',title:'토벌 의뢰 열기',description:'Open the visible J hunt journal and pause play.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=openBattle();if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'select_field_hunt',title:'토벌 대상 선택',description:'Choose Varkan or Lysea in the open J journal. Each has its own arena, quest, rewards and records. Unavailable during a hunt. Lysea uses pillar cover, rotating beams and shadow-bearing mirror doubles.',inputSchema:{type:'object',properties:{boss:{type:'string',enum:['varkan','lysea']}},required:['boss'],additionalProperties:false},execute(input){if(!input||!['varkan','lysea'].includes(input.boss)||Object.keys(input).some(k=>k!=='boss'))throw new Error('Choose varkan or lysea.');const r=selectHunt(input.boss);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'accept_field_quest',title:'선택한 토벌 의뢰 받기',description:'Accept the first outdoor boss quest from the open journal while in the village.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute(input){validateEmpty(input);const r=questAction('accept');if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'travel_to_field_boss',title:'선택한 보스 지역으로 이동',description:'Travel using the open journal. Requires accepted quest and no active combat or skill. Arrives in the selected boss arena; does not start combat.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute(input){validateEmpty(input);const r=travelToHunt();if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'start_field_hunt',title:'선택한 보스에게 도전',description:'Start the outdoor boss directly using the open hunt journal, while in the basin. Choose solo or Nari with three limited heals. Same rules as the visible button.',inputSchema:{type:'object',properties:{companion:{type:'string',enum:['none','nari']}},required:['companion'],additionalProperties:false},execute(input){if(!input||!['none','nari'].includes(input.companion)||Object.keys(input).some(k=>k!=='companion'))throw new Error('Choose none or nari.');$('hunt-companion').value=input.companion;const r=startBattle('field');if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'claim_hunt_reward',title:'첫 토벌 의뢰 보상',description:'Claim the one-time quest reward in the village with the journal open after defeating the selected boss.',inputSchema:{type:'object',properties:{},additionalProperties:false},execute(input){validateEmpty(input);const r=questAction('claim');if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'rally_residents',title:'주민 집결 또는 교전',description:'Toggle G between rallying near the player and fighting nearby enemies. Requires an active unpaused battle. Matches the visible resident command button.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=rallyResidents();if(!r.accepted)throw new Error(r.reason);return state();}},
     { name: 'get_player_state', title: '캐릭터 상태 확인', description: 'Read player, combat, warrior and forestry state: wood inventory, handle upgrade, nearby trees with health, cracks and regrowth, and dropped wood. Includes combo progress, ultimate readiness, spin statistics, creatures and autoMelee attack count. While playing, axe and sword automatically attack the nearest living creature within their normal melee reach and unobstructed height. Auto swings preserve movement and give way to skill inputs; auto attack waits during skills, planted-axe follow-ups and unfinished combo windows. Trees do not initiate auto attacks; bows remain manual.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },

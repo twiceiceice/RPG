@@ -9,14 +9,14 @@
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23172e2c'/%3E%3Cpath d='M7 23L15 7l10 16H7Z' fill='%23cbe49c'/%3E%3Cpath d='M15 7v16h10Z' fill='%237fb7a2'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
 </head>
-<body>
+<body class="field-edition">
   <main id="world" tabindex="0" aria-label="3D 사냥 들판. WASD 이동, Space 점프, 1 돌진, 2 내려찍기, 3 날아차기, 4 가로베기, 5 궁극기 회전베기. Z 도끼, X 칼, C 활. 좌클릭 기본 공격, F 회피, 6 전투 함성, V 시점 전환."></main>
   <header class="hud top">
-    <div class="identity"><span class="mark" aria-hidden="true">△</span><div><h1>바람의 들판</h1><p>들판과 마을 사이</p></div></div>
+    <div class="identity"><span class="mark" aria-hidden="true">△</span><div><h1>바람의 들판</h1><p>폭풍과 거울의 두 전설</p></div></div>
     <nav class="actions" aria-label="게임 조작">
       <button id="talents-button" title="레벨과 특성 (P)">특성 <kbd>P</kbd><span id="talent-badge">1</span></button>
       <button id="build-button" title="건축 모드 (K)" aria-pressed="false">건축 <kbd>K</kbd></button>
-      <button id="battle-button" title="마을 방어와 야영지 공격">전투 <kbd>J</kbd></button>
+      <button id="battle-button" title="야외 보스 토벌 의뢰 (J)">의뢰 <kbd>J</kbd></button>
       <button id="village-button" title="전투 중이 아닐 때 솔바람 마을로 이동 (B)">마을 <kbd>B</kbd></button>
       <button id="view-button" title="V 키로 시점 전환"><span id="view-label">3인칭</span><kbd>V</kbd></button>
       <button id="audio-button" class="icon-button" title="음악과 효과음" aria-label="소리 설정">♫</button>
@@ -34,20 +34,20 @@
     <div class="wallet-row"><span><b id="gold-count">20</b> 골드</span><button id="potion-button" title="체력 45 회복 · H · 재사용 4초">H 물약 1</button></div>
   </section>
   <div id="village-status">솔바람 마을 · B 이동</div>
-  <section id="raid-hud" hidden aria-label="마을 전투 상황">
-    <div class="raid-heading"><span id="raid-mode">마을 방어</span><strong id="raid-wave"></strong></div>
+  <section id="raid-hud" hidden aria-label="야외 토벌 상황">
+    <div class="raid-heading"><span id="raid-mode">야외 토벌</span><strong id="raid-wave"></strong></div>
     <p id="raid-objective"></p>
-    <div id="beacon-status"><span>수호 깃발</span><progress id="beacon-health" max="350" value="350" aria-label="수호 깃발 체력"></progress><b id="beacon-value">350</b></div>
     <div id="raid-allies" aria-label="참전 주민"></div>
     <button id="rally-button"><kbd>G</kbd> 내게 모이기</button>
   </section>
   <section id="boss-hud" hidden aria-label="우두머리 전투">
-    <div class="boss-heading"><strong id="boss-name">붉은발 우두머리 · 바르칸</strong><span id="boss-phase">1단계</span></div>
+    <div class="boss-heading"><strong id="boss-name">폭풍뿔 바르칸</strong><span id="boss-phase">1단계</span></div>
     <div class="boss-health-row"><progress id="boss-health" max="100" value="100" aria-label="우두머리 체력"></progress><span id="boss-health-text"></span></div>
     <div class="boss-cast-row"><strong id="boss-cast-name"></strong><span id="boss-cast-time"></span></div>
     <progress id="boss-cast" max="1" value="0" aria-label="우두머리 기술 시전"></progress>
     <p id="boss-hint" role="status"></p>
   </section>
+  <button id="hunt-prompt" hidden><kbd>J</kbd> 폭풍뿔 바르칸 · 토벌 준비 →</button>
   <button id="interact-prompt" hidden><kbd>E</kbd><span id="interact-label">주민과 대화하기</span><span aria-hidden="true">→</span></button>
   <section id="lumber-hud" aria-label="벌목 보상">
     <div class="lumber-total"><span>목재</span><strong id="wood-count">0</strong></div>
@@ -70,12 +70,12 @@
   <div id="damage-flash" aria-hidden="true"></div><div id="combat-fx" aria-hidden="true"></div>
   <div id="loading" role="status">들판을 불러오는 중…</div>
   <section id="welcome" class="welcome" hidden aria-label="플레이 시작">
-    <span class="eyebrow">나의 집, 우리의 마을</span>
-    <h2>더 넓어진 솔바람.</h2>
-    <p>빈 터에 블록을 놓아 집을 짓고,<br>열 명의 주민과 마을을 지켜요.<br>10레벨까지 나만의 전사로 성장하세요.</p>
+    <span class="eyebrow">FIELD HUNTS · 폭풍과 거울</span>
+    <h2>두 전설을 찾아서.</h2>
+    <p>번개를 두른 야수, 거울 속 마녀.<br>공명석을 깨우거나 진짜 분신을 간파하며<br>서로 다른 두 보스를 공략하세요.</p>
     <button id="play-button" class="primary">들판으로 <span aria-hidden="true">↗</span></button>
-    <button id="village-start" class="secondary">마을에서 시작 <span aria-hidden="true">⌂</span></button>
-    <small>P 특성 · K 건축 · ♫ 소리 조절</small>
+    <button id="village-start" class="secondary">마을에서 의뢰 준비 <span aria-hidden="true">⌂</span></button>
+    <small>B 마을 → J 의뢰 → 토벌 대상 선택</small>
   </section>
   <div id="resume" class="resume" hidden><button id="resume-button">계속 걷기 <kbd>클릭</kbd></button></div>
   <div id="toast" role="status" hidden></div>
@@ -116,19 +116,21 @@
     <div class="touch-actions"><button id="touch-run" aria-label="달리기 전환" aria-pressed="false">달리기</button><button id="touch-jump" aria-label="점프">점프</button><button id="touch-attack" aria-label="장착한 무기로 공격">공격</button></div>
   </div>
   <dialog id="battle-dialog" aria-labelledby="battle-title">
-    <div class="dialog-heading"><div><span class="eyebrow">솔바람 원정대</span><h2 id="battle-title">함께 싸울 시간</h2></div><button id="close-battle" class="icon-button" aria-label="전투 메뉴 닫기">×</button></div>
-    <p class="battle-intro">강화된 3차 전투 · 특성을 고르고 갑옷과 물약을 준비하세요.<br>주민이 교전을 돕고, 당신은 바닥 회피와 우두머리 차단을 맡아요.</p>
+    <div class="dialog-heading"><div><span class="eyebrow">FIELD HUNT · 솔바람 조사 의뢰</span><h2 id="battle-title">잠든 폭풍을 깨우다</h2></div><button id="close-battle" class="icon-button" aria-label="토벌 의뢰 닫기">×</button></div>
+    <div class="hunt-selection" role="group" aria-label="토벌 대상"><button data-hunt="varkan" aria-pressed="true"><span>폭풍뿔 바르칸</span><small>야수 · 번개 유도 · 공명석</small></button><button data-hunt="lysea" aria-pressed="false"><span>거울 마녀 리세아</span><small>술사 · 기둥 엄폐 · 분신 간파</small></button></div>
+    <p id="hunt-intro" class="battle-intro">서쪽 고분에 번개가 내리기 시작했다. 돌갑옷 아래 잠든 야수,<br><strong>폭풍뿔 바르칸</strong>을 찾아 천둥잠 분지의 이상 기후를 조사하자.</p>
+    <div id="quest-status" role="status"></div>
     <div id="battle-result" hidden role="status"></div>
-    <div class="battle-options">
-      <article><span class="battle-emblem" aria-hidden="true">⚑</span><h3>마을을 지켜라</h3><p>주민 10명과 3차 습격을 막아요.<br>12명 → 16명 → 보스와 호위 9명.<br>총 38명 + 나팔을 놓치면 추가 증원.</p><strong>100 골드 · 나무 24 · 돌 14 · 지붕 4 · 320 XP</strong><button id="start-defense">마을 방어 시작</button></article>
-      <article><span class="battle-emblem attack" aria-hidden="true">⚔</span><h3>붉은발 야영지</h3><p>주민 7명과 3단계로 진격해요.<br>10명 → 12명 → 보스와 호위 6명.<br>총 29명 + 나팔을 놓치면 추가 증원.</p><strong>150 골드 · 돌 25 · 지붕 12 · 420 XP</strong><button id="start-assault">주민들과 출정</button></article>
-    </div>
-    <p id="battle-reason"></p>
-    <div class="battle-rules"><span><kbd>G</kbd> 내게 모이기 / 교전</span><span>쓰러진 주민은 재정비 때 회복</span><span>사망 · 깃발 파괴 · 전장 이탈 시 실패</span></div>
-    <details class="battle-guide"><summary>우두머리 공략 · 바닥을 보고 움직이세요</summary><p>전방 쓸기는 옆·뒤로, 불씨는 발밑 원 밖으로, 바깥 고리는 초록색 안쪽으로 피하세요. 갈라지는 땅은 줄 사이가 안전합니다. 불씨가 떨어진 자리에는 불길이 4초간 남아요.</p><p>체력 65%·35%에 증원 나팔을 준비합니다. 2 내려찍기 → 3 날아차기로 3.8초 안에 끊으면 증원 4명을 막고 6초간 보스가 받는 피해가 40% 늘어요. F 회피로 바닥을 피하고 공격 기회에 6 함성을 쓰세요.</p><p>보스는 밀침·경직·끌어당기기를 버팁니다. 35% 이하에서 공격 간격이 짧아지고, 보스전 150초가 지나면 더 빠르게 공격합니다. 주민도 바닥을 피하지만 즉시 완벽하게 반응하지는 않아요.</p></details>
-    <details class="battle-guide"><summary>개발 로드맵</summary><ol><li><strong>현재:</strong> 3차 습격, 패턴 보스, 바닥 회피와 차단.</li><li><strong>다음:</strong> 전투 화면 정리, 난도 선택, 전투 결과와 보스 연습.</li><li><strong>이후:</strong> 적 마을 상주·순찰·경보와 정찰 후 출정.</li><li>성문·울타리·방어 시설과 주민 배치.</li><li>전리품·장비 선택·상점 해금으로 전투와 거래 연결.</li><li>새 지역·보스·마법사. 제작과 LLM 대화는 핵심 흐름이 완성된 뒤.</li></ol></details>
-    <p class="battle-footnote">파동 사이 10초간 전열을 정비하고 체력을 일부 회복해요. 승리할 때마다 일반 병력과 보스 체력이 조금 증가합니다(최대 24%). 보스 바닥 피해는 증가하지 않아요. 제한 시간 8분 · 승리 보상 1회 · 건물은 파괴되지 않아요.</p>
-    <button id="retreat-button" hidden>철수하고 마을로 돌아가기 · 보상 없음</button>
+    <div class="hunt-brief"><span>야외 보스 1마리</span><span>혼자 또는 나리와 동행</span><span>F 회피 · H 물약</span></div>
+    <div class="hunt-preparation"><label for="hunt-companion">동행</label><select id="hunt-companion"><option value="none">혼자 도전</option><option value="nari">나리 · 위급할 때 치유 3회</option></select><span>토벌 중 자동 체력 회복이 멈춥니다.</span></div>
+    <div class="hunt-actions"><button id="accept-hunt">마을에서 의뢰 받기</button><button id="travel-hunt">분지로 이동</button><button id="start-hunt">바르칸 깨우기</button><button id="claim-hunt" hidden>첫 의뢰 보상 받기</button></div>
+    <p id="battle-reason" role="status"></p>
+    <div class="hunt-reward"><strong>첫 보고 보상</strong><span id="hunt-first-reward">80 골드 · 나무 12 · 돌 8 · 지붕 4 · 180 XP</span><small id="hunt-repeat-reward">바르칸 처치마다 150 XP · 두 번째부터 12 골드와 돌 2개 즉시 지급</small></div>
+    <details class="battle-guide" open><summary id="hunt-guide-title">공략 수첩 · 번개를 무기로 바꾸세요</summary>
+      <ol id="hunt-guide-list"><li><strong>뿔 휩쓸기</strong> — 앞쪽 부채꼴을 피해 옆과 뒤에서 공격.</li><li><strong>번개 낙인</strong> — 따라오는 원을 가장자리로 유도. 원이 멈추면 벗어나기.</li><li><strong>울림의 파동</strong> — 안쪽이 먼저 폭발. 터진 안쪽으로 들어가 바깥 고리 피하기.</li><li><strong>공명석 과부하</strong> — 빛기둥이 솟는 공명석에 내 번개 원을 겹치기. 성공하면 8초간 약점 노출! 받는 피해 +40%.</li></ol>
+    </details>
+    <p id="hunt-footnote" class="battle-footnote">공명석을 놓쳐도 다시 기회가 옵니다. 체력 65%·35%에 패턴이 강화되며, 마지막 단계에는 파동과 낙인이 겹칩니다. 분지를 크게 벗어나면 토벌 종료. 현재는 주간 대기 없이 반복 도전할 수 있어요.</p>
+    <button id="retreat-button">마을로 돌아가기</button>
   </dialog>
   <dialog id="trade-dialog" aria-labelledby="resident-name" aria-describedby="resident-hello">
     <div class="resident-heading"><div id="resident-portrait" aria-hidden="true">미</div><div><span id="resident-role">목재 상인</span><h2 id="resident-name">미라</h2></div><button id="close-trade" class="icon-button" aria-label="대화 닫기">×</button></div>
@@ -157,9 +159,9 @@
     <div class="dialog-heading"><h2 id="help-title">들판에서 살아남기</h2><button id="close-help" class="icon-button" aria-label="조작법 닫기">×</button></div>
     <p><strong>F 회피 · 6 전투 함성</strong><br>이동 키와 F를 함께 누르면 그 방향으로 약 3.8m 회피해요. 이동 입력이 없으면 바라보는 방향입니다. 처음 0.28초 동안 피해를 피하며 4초마다 사용할 수 있어요. 현재 공격 동작은 취소하지만 이미 맞힌 연계 단계는 유지해요. 회피 중에는 연계 시간이 멈추고 끝나면 최소 2초를 줍니다. 회피 중 다음 기술을 미리 누르면 이어지고, 도끼를 회수했다면 도끼를 든 날아차기로 연결해요. 타격 전 취소한 기술은 다시 시도할 수 있지만 빗맞힌 공격은 성공으로 세지 않아요. 짧은 경직은 연계를 보존하고 큰 경직은 끊습니다. 준비된 궁극기도 보존해요. 전투 함성은 30초마다 6초간 피해 +35%·받는 피해 −25%를 줍니다. 도끼·칼·활 모두 사용할 수 있으며 기술 연계를 끊지 않아요.</p>
     <p><strong>아군과 적군 · 같은 세 전투 역할</strong><br>방패병은 정면 피해를 65% 줄이고 돌진해요. 옆이나 뒤를 노리거나 날아차기로 방패를 4초간 무너뜨리세요. 전사는 돌진·내려찍기·가로베기를 사용하고, 궁수는 조준 사격과 후방 회피를 사용합니다. 전투병의 기술은 플레이어와 범위·재사용 규칙을 공유하고 피해량은 별도 조정돼요. 붉은 표시는 적, 청록 표시는 아군입니다. 궁수의 조준선은 발사 전에 고정되므로 옆으로 피할 수 있어요. 적 돌진에는 추가 준비 동작이 있어요. 날아차기와 경직으로 적 기술을 끊을 수 있습니다.</p>
-    <p><strong>P · 레벨과 특성</strong><br>최대 10레벨. 사냥·벌목·습격으로 경험치를 얻고, 처음 1점과 레벨마다 1점씩 총 10점을 배워요. 세 갈래의 위 특성을 1점 이상 배워야 아래로 이어지며, 3·5·8레벨에 다음 줄이 열립니다. 서로 다른 갈래를 함께 고를 수 있고 마을에서 무료 초기화가 가능해요. 거래·건축 반복에는 경험치가 없어요. 새로고침해도 경험치와 특성이 유지됩니다.</p>
+    <p><strong>P · 레벨과 특성</strong><br>최대 10레벨. 사냥·벌목·보스 토벌로 경험치를 얻고, 처음 1점과 레벨마다 1점씩 총 10점을 배워요. 세 갈래의 위 특성을 1점 이상 배워야 아래로 이어지며, 3·5·8레벨에 다음 줄이 열립니다. 서로 다른 갈래를 함께 고를 수 있고 마을에서 무료 초기화가 가능해요. 거래·건축 반복에는 경험치가 없어요. 새로고침해도 경험치와 특성이 유지됩니다.</p>
     <p><strong>♫ · 소리</strong><br>플레이를 시작하면 잔잔한 음악이 반복됩니다. 공격마다 효과음이 달라요. 소리 설정에서 음악과 효과음의 크기를 따로 조절하거나 모두 끌 수 있어요.</p>
-    <p><strong>J · 방어와 출정</strong><br>B로 마을에 돌아온 뒤 전투 메뉴를 여세요. 방어는 주민 10명과 총 38명, 출정은 주민 7명과 총 29명을 상대하는 3차 전투입니다. 마지막에는 바닥 공격을 쓰는 우두머리가 등장해요. 붉은 바닥을 피하고, 증원 나팔은 2 내려찍기 → 3 날아차기로 끊으세요. 준비 8초, 파동 사이 10초이며 체력을 일부 회복합니다. 방어 깃발 파괴·플레이어 사망·8분 초과·전장 이탈 시 실패해요. 전투 중 거래와 B 이동은 쉬어요. 자세한 공략과 개발 로드맵은 J 메뉴에 있어요.</p>
+    <p><strong>J · 두 야외 보스 의뢰</strong><br>B로 마을에 돌아와 J에서 바르칸 또는 리세아의 의뢰를 받으세요. 각 전장으로 이동한 뒤 도전하면 전투가 시작됩니다. 바르칸은 공명석에 번개를 유도하고, 리세아는 기둥 뒤에서 응시를 피하고 검은 그림자가 있는 진짜 분신을 찾으세요. 성공하면 본체가 노출되어 공격 기회가 생깁니다. 토벌 중 자동 체력 회복은 멈추며 물약이나 나리의 치유로 회복합니다. 전장을 크게 벗어나면 종료됩니다. 두 보스의 보상과 기록은 각각 저장되며, J에서 공략을 읽거나 마을로 철수할 수 있습니다.</p>
     <p><strong>G · 주민 지시</strong><br>교전 중에는 주민이 적에게 접근해 싸우고, 내게 모이기를 누르면 플레이어 근처로 돌아와 가까운 적만 상대해요. 경비는 피해를 덜 받고, 궁수는 멀리서 활을 쏘며, 치유사는 플레이어와 주민을 치료해요. 체력이 낮은 주민은 뒤로 물러나고, 쓰러져도 전투가 끝나면 회복합니다. 주민 공격은 날아차기의 치명타 기회를 소모하지 않아요.</p>
     <p>적의 붉은 원은 내려찍기, 부채꼴은 가로베기, 긴 띠는 돌진 경로예요. 범위 밖으로 피하거나 날아차기로 끊어 보세요. 전투는 사망·깃발 파괴·전장 48m 이탈·8분 경과·철수/R로 끝나며, 실패해도 기존 소지품은 잃지 않습니다. 진행 중인 전투는 새로고침하면 종료되고, 받은 보상과 승리 횟수는 저장돼요.</p>
     <p><strong>B · 솔바람 마을</strong><br>마을이 54 × 44m로 넓어졌어요. 주민 열 명과 빈 건축 부지 세 곳이 있어요. 가까운 주민에게 <strong>E</strong>를 누르거나 대화 버튼을 눌러 보세요. 주민 근처에서 E는 대화, 그 밖에서는 시점 회전입니다. 대화 중에는 게임이 잠시 멈추고, 마을 안에서는 공격이 나가지 않아요. B로 이동하려면 동작을 마치고, 슬라임에게서 8m 이상 떨어져 6초 동안 피해를 받지 않아야 해요.</p>

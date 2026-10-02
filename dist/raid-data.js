@@ -1,3 +1,4 @@
+import {MIRROR_FIELD} from './field-data.js';
 export const CAMP={name:'붉은발 야영지',x:-32,z:15,halfX:12,halfZ:12,entry:{x:-17,z:15}};
 export const BEACON={x:21,z:15,maxHp:350};
 const squad=(guards,warriors,archers)=>[...Array(guards).fill('guard'),...Array(warriors).fill('melee'),...Array(archers).fill('archer')];
@@ -17,5 +18,5 @@ export const ALLY_ROLES={
 };
 export const EXPEDITION=['hari','jun','hodu','nari','daon','roan','lua'];
 export function inCamp(x,z,margin=0){return Math.abs(x-CAMP.x)<CAMP.halfX+margin&&Math.abs(z-CAMP.z)<CAMP.halfZ+margin;}
-export function raidClearance(x,z){return inCamp(x,z,2)||(x>-20&&x<12&&Math.abs(z-15)<4.5);}
-export function campGroundBlend(x,z){const d=Math.max(Math.abs(x-CAMP.x)-CAMP.halfX,Math.abs(z-CAMP.z)-CAMP.halfZ,0)/4;const t=Math.min(1,d);return t*t*(3-2*t);}
+export function raidClearance(x,z){return inCamp(x,z,2)||Math.hypot(x-MIRROR_FIELD.x,z-MIRROR_FIELD.z)<MIRROR_FIELD.radius+3||(x>-20&&x<12&&Math.abs(z-15)<4.5);}
+export function campGroundBlend(x,z){const d=Math.max(Math.abs(x-CAMP.x)-CAMP.halfX,Math.abs(z-CAMP.z)-CAMP.halfZ,0)/4;const t=Math.min(1,d),m=Math.min(1,Math.max(0,(Math.hypot(x-MIRROR_FIELD.x,z-MIRROR_FIELD.z)-MIRROR_FIELD.radius)/4));return t*t*(3-2*t)*m*m*(3-2*m);}

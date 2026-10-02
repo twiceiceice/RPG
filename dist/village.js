@@ -1,6 +1,7 @@
 import { terrainHeight, overlaps } from './movement.js';
 import { VILLAGE, RESIDENTS, BUILDING_BLOCKS, inVillage } from './village-data.js';
 import { Progression } from './progression.js';
+import {newHuntQuest} from './field-data.js';
 
 const SAVE_KEY='windfield-village-v1';
 const armorCosts=[20,35,50];
@@ -10,7 +11,7 @@ export class Village {
     this.combat=combat;combat.village=this;this.storage=storage;this.storageAvailable=!!storage;
     this.gold=20;this.potions=1;this.armorLevel=0;this.potionCooldown=0;this.time=0;this.saveClock=0;this.lastSaved='';
     this.blocks={timber:0,stone:0,roof:0};this.structures=[];this.progression=new Progression(combat);
-    this.raidWins={defense:0,assault:0};
+    this.raidWins={defense:0,assault:0};this.huntQuest=newHuntQuest();this.mirrorQuest=newHuntQuest();this.saveBlocked=false;
     this.residents=RESIDENTS.map(n=>({...n,y:terrainHeight(n.x,n.z),step:0,moving:false,wait:1,routeIndex:0}));
     this.load();combat.armorLevel=this.armorLevel;combat.hp=combat.maxHp;
     for(const e of combat.entities)if(this.isSafe(e)){e.x=e.homeX=6;e.z=e.homeZ=18;e.y=terrainHeight(e.x,e.z);}
@@ -21,16 +22,21 @@ export class Village {
   load() {
     try {
       const raw=this.storage?.getItem(SAVE_KEY);if(!raw)return;
-      const data=JSON.parse(raw);if(!data||data.version!==1)return;
+      const data=JSON.parse(raw);if(!data||data.version!==1){this.saveBlocked=true;this.storageAvailable=false;return;}
       this.gold=integer(data.gold,20,999999);this.potions=integer(data.potions,1,99);this.armorLevel=integer(data.armorLevel,0,3);
       this.combat.forestry.wood=integer(data.wood,0,99999);this.combat.forestry.level=integer(data.handleLevel,0,3);
       for(const key of Object.keys(this.blocks))this.blocks[key]=integer(data.blocks?.[key],0,99999);
       for(const key of Object.keys(this.raidWins))this.raidWins[key]=integer(data.raidWins?.[key],0,99999);
+      for(const key of ['huntQuest','mirrorQuest']){
+        const q=data[key];
+        if(q&&typeof q==='object'){const clears=integer(q.clears,0,99999);this[key]={accepted:q.accepted===true||clears>0,clears,rewardClaimed:clears>0&&q.rewardClaimed===true,bestTime:clears>0&&Number.isFinite(q.bestTime)&&q.bestTime>0?q.bestTime:null};}
+      }
       this.progression.load(data.progression);this.structures=Array.isArray(data.structures)?data.structures.slice(0,600):[];
-    } catch { this.storageAvailable=false; }
+    } catch { this.storageAvailable=false;this.saveBlocked=true; }
   }
   save() {
-    const payload=JSON.stringify({version:1,gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,wood:this.combat.forestry.wood,handleLevel:this.combat.forestry.level,blocks:this.blocks,raidWins:this.raidWins,progression:this.progression.serialize(),structures:this.structures});
+    if(this.saveBlocked)return;
+    const payload=JSON.stringify({version:1,gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,wood:this.combat.forestry.wood,handleLevel:this.combat.forestry.level,blocks:this.blocks,raidWins:this.raidWins,huntQuest:this.huntQuest,mirrorQuest:this.mirrorQuest,progression:this.progression.serialize(),structures:this.structures});
     if(payload===this.lastSaved)return;
     try {if(this.storage){this.storage.setItem(SAVE_KEY,payload);this.storageAvailable=true;}this.lastSaved=payload;}
     catch {this.storageAvailable=false;}

@@ -172,6 +172,7 @@ export class Warrior {
       const guaranteedCritical = a.streak === 2;
       let critical = false, kills = 0;
       for (const e of targets) {
+        if(!e.alive)continue; // A true mirror hit can remove the other projections in this pulse.
         const dx=e.x-player.x,dz=e.z-player.z,length=Math.hypot(dx,dz)||1;
         const result=combat.damageEntity(e,a.stage===2?SPIN.empoweredDamage:SPIN.damage,dx/length,dz/length,{source:'spin',forceCritical:guaranteedCritical});
         critical ||= result.critical; if(result.killed) kills++;
