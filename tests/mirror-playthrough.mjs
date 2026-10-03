@@ -11,6 +11,7 @@ import * as THREE from '../dist/vendor/three.module.js';
 const scene=new THREE.Scene(),env=createEnvironment(scene);createMirrorScenery(scene,env);
 const h=new Hunting(env.colliders),p=new Movement(env.colliders),v=new Village(h),r=new FieldHunt(h,v),dt=1/120;
 h.entities=[];h.equip('axe');Object.assign(p,{x:20,z:15,y:0});r.select('lysea');r.acceptQuest(p);Object.assign(p,{...FIELD.entry,y:0});r.start('field',p);
+const shortRoute=process.argv.includes('--short');
 let goal={...FIELD.entry},decision=0,route=[],lastCast=null;
 for(let time=0;time<600&&r.active;time+=dt){
   const b=r.boss,u=b.unit,target=b.projections.find(e=>e.alive&&e.realMirror)??u,d=Math.hypot(target.x-p.x,target.z-p.z)||1,dir={x:(target.x-p.x)/d,z:(target.z-p.z)/d};
@@ -38,7 +39,7 @@ for(let time=0;time<600&&r.active;time+=dt){
       h.warrior.setAim(dir);
       if(u.exposed>0)h.tactics.request('battlecry',p,dir);
       if(!h.warrior.active||h.warrior.active.id==='slash'){
-        const id=h.warrior.ultimate.ready&&!u.mirrorVeiled?'spin':h.warrior.followup?(h.warrior.followup.kicked?'sweep':'kick'):h.warrior.combo.step===1?'slam':'charge';h.warrior.request(id,p,dir);
+        const id=h.warrior.ultimate.ready&&!u.mirrorVeiled?'spin':h.warrior.followup?(shortRoute||h.warrior.followup.kicked?'sweep':'kick'):shortRoute||h.warrior.combo.step===1?'slam':'charge';h.warrior.request(id,p,dir);
       }
     }
     if(h.hp<35&&v.potions)v.usePotion();
@@ -50,7 +51,8 @@ for(let time=0;time<600&&r.active;time+=dt){
 }
 assert.equal(r.result?.won,true,'real movement around solid pillars and weapon skills can complete a solo hunt');
 assert.ok(r.result.bossStats.mirrorBreaks>=2);assert.ok(r.result.bossStats.coverSuccess>=1);assert.equal(v.mirrorQuest.clears,1);assert.equal(v.huntQuest.clears,0);
-console.log(`PASS solo Lysea hunt using real movement, terrain cover and shadow recognition (${r.result.elapsed}s simulated)`);
+if(shortRoute){assert.equal(h.warrior.executions.charge,0);assert.equal(h.warrior.executions.kick,0);assert.ok(h.warrior.executions.spin>0);}
+console.log(`PASS ${shortRoute?'short-route':'full'} solo Lysea hunt using real movement, terrain cover and shadow recognition (${r.result.elapsed}s simulated)`);
 h.restorePlayer();Object.assign(p,{...FIELD.entry,y:0,vx:0,vz:0,vy:0});assert.ok(r.start('field',p).accepted);
 for(let time=0;time<400&&r.active;time+=dt){p.update(dt,{x:0,z:0});h.update(dt,p);r.update(dt,p);h.autoAttack(p);h.events=[];}
 assert.equal(r.result?.won,false,'idling through the encounter fails');assert.equal(v.mirrorQuest.clears,1);assert.equal(v.huntQuest.clears,0);

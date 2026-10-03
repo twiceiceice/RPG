@@ -45,12 +45,13 @@ export class RaidBoss {
     this.cast=null;this.cooldown=6;unit.exposed=6;this.stats.interrupts++;
     this.raids.combat.events.push({type:'boss-warning',pattern:'interrupted',message:'나팔 차단! 증원 저지 · 6초간 보스가 받는 피해 +40%'});return true;
   }
-  hit(h,target,amount){
+  hit(h,target,amount,ongoing=false){
     if(!inHazard(h,target)||Math.abs((target.y??0)-terrainHeight(target.x,target.z))>3)return;
     if((this.hitGrace.get(target.id)??0)>this.time)return;
     if(h.shape==='cone'&&!this.raids.visible({x:h.x,z:h.z,y:terrainHeight(h.x,h.z)},target))return;
     // Overlapping floor effects cannot stack into a one-frame kill.
-    if(this.raids.hitAlly(target,amount,{ground:true,dx:0,dz:0})){
+    const source=ongoing?(h.burnSource??`${h.source??BOSS_PATTERNS[h.pattern]?.name??'바닥 공격'} · 지속 피해`):(h.source??BOSS_PATTERNS[h.pattern]?.name??this.unit?.name);
+    if(this.raids.hitAlly(target,amount,{ground:true,dx:0,dz:0,source})){
       this.hitGrace.set(target.id,this.time+.9);if(target.id==='player')this.stats.playerHits++;
     }
   }
@@ -80,7 +81,7 @@ export class RaidBoss {
     for(const h of this.hazards){
       h.age+=dt;
       if(!h.fired&&h.age>=h.delay){h.fired=true;h.nextTick=h.delay+1;for(const target of this.raids.friendlies(player))this.hit(h,target,h.damage);this.raids.combat.events.push({type:'boss-impact',x:h.x,y:terrainHeight(h.x,h.z),z:h.z});}
-      if(h.fired&&h.burn&&h.age>=h.nextTick&&h.age<h.delay+h.life){h.nextTick+=1;for(const target of this.raids.friendlies(player))this.hit(h,target,h.burn);}
+      if(h.fired&&h.burn&&h.age>=h.nextTick&&h.age<h.delay+h.life){h.nextTick+=1;for(const target of this.raids.friendlies(player))this.hit(h,target,h.burn,true);}
     }
     this.hazards=this.hazards.filter(h=>h.age<h.delay+h.life);
   }

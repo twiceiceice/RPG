@@ -19,11 +19,11 @@ test('a real four-hit combo unlocks exactly one stored ultimate, including a let
  run(s,5,{x:1,z:0});s.h.damagePlayer(12);s.h.equip('sword');run(s,.2);s.h.equip('axe');assert.ok(s.w.ultimate.ready);
  assert.ok(s.w.request('spin',s.p,forward).accepted);assert.equal(s.w.ultimate.ready,false);run(s,2.6);assert.equal(s.w.active,null);assert.equal(s.w.request('spin',s.p,forward).accepted,false);
 });
-test('misses, skipping a step and timer expiration break progress; rejected input does not',()=>{
+test('misses and timer expiration break the chain; skipping kick completes a short route',()=>{
  const s=setup();s.w.request('charge',s.p,forward);run(s,.6);assert.equal(s.w.combo.step,0);assert.match(s.w.combo.failure,/빗나/);
  const t=setup();enemy(t);t.w.request('charge',t.p,forward);run(t,.55);assert.equal(t.w.combo.step,1);
  assert.equal(t.w.request('kick',t.p,forward).accepted,false);assert.equal(t.w.request('spin',t.p,forward).accepted,false);assert.equal(t.w.combo.step,1);
- t.w.request('slam',t.p,forward);run(t,1.1);assert.equal(t.w.combo.step,2);t.w.request('sweep',t.p,forward);run(t,1.7);assert.equal(t.w.combo.step,0);assert.equal(t.w.ultimate.ready,false);
+ t.w.request('slam',t.p,forward);run(t,1.1);assert.equal(t.w.combo.step,2);t.w.request('sweep',t.p,forward);run(t,1.7);assert.equal(t.w.combo.step,4);assert.equal(t.w.combo.route,'short');assert.equal(t.w.ultimate.charge,60);assert.equal(t.w.ultimate.ready,false);
  const u=setup();enemy(u);u.w.request('charge',u.p,forward);run(u,.55);run(u,3.1);assert.equal(u.w.combo.step,0);assert.match(u.w.combo.failure,/시간/);
 });
 test('a point-blank off-center target stays in front for the final sweep and unlocks the ultimate',()=>{

@@ -75,8 +75,8 @@ export class Raids {
   friendlies(player){return [...this.allies.filter(a=>a.alive),this.playerTarget(player)];}
   hitAlly(target,amount,context={}){
     if(target.id==='player'){
-      const hit=this.combat.damagePlayer(amount);
-      if(hit&&context.stagger&&this.combat.hp>0){this.combat.tactics.stagger=Math.max(this.combat.tactics.stagger,context.stagger);this.combat.warrior.interrupt(context.stagger>=.65);this.combat.cancelDraw();}
+      const hit=this.combat.damagePlayer(amount,{source:context.source??BATTLE[context.skill]?.name??'적의 공격'});
+      if(hit&&context.stagger&&this.combat.hp>0){this.combat.tactics.stagger=Math.max(this.combat.tactics.stagger,context.stagger);this.combat.warrior.interrupt(context.stagger>=.65);this.combat.mage.cancel();this.combat.cancelDraw();}
       return hit;
     }
     if(!target.alive)return false;
@@ -95,7 +95,7 @@ export class Raids {
     unit.swing=.32;if(!target?.alive)return;
     if(distance(unit,target)>unit.range+.55||!this.visible(unit,target))return;
     if(unit.style==='archer'){this.shoot(unit,target,friendly);return;}
-    const amount=Math.round(unit.damage*(unit.battlecry>0?BATTLE.battlecry.damage:1)),d=distance(unit,target)||1,context={dx:(target.x-unit.x)/d,dz:(target.z-unit.z)/d};
+    const amount=Math.round(unit.damage*(unit.battlecry>0?BATTLE.battlecry.damage:1)),d=distance(unit,target)||1,context={dx:(target.x-unit.x)/d,dz:(target.z-unit.z)/d,source:`${unit.name}의 공격`};
     if(friendly){this.combat.damageEntity(target,amount,context.dx,context.dz,{source:'ally',preserveOpening:true});}
     else if(unit.style==='captain'){
       // The red circle previews a short cleave that can be dodged or interrupted by a kick.
@@ -132,7 +132,7 @@ export class Raids {
   }
   updateEnemy(e,dt,player){
     if(e.boss)return;
-    e.moving=false;e.swing=Math.max(0,(e.swing??0)-dt);if(this.skills.tick(e,dt,player,false)||!e.alive||e.knockback||e.stagger>0)return;
+    e.moving=false;e.swing=Math.max(0,(e.swing??0)-dt);if(e.frozen>0&&!e.ccImmune)return;if(e.slowed>0&&!e.ccImmune)dt*=.5;if(this.skills.tick(e,dt,player,false)||!e.alive||e.knockback||e.stagger>0)return;
     const friends=this.friendlies(player);
     if(this.mode==='defense')friends.push(this.beacon);
     const nearby=friends.filter(a=>a.alive).sort((a,b)=>distance(e,a)-distance(e,b));
@@ -150,7 +150,7 @@ export class Raids {
       const targets=b.friendly?this.enemies:this.friendlies(player).concat(this.mode==='defense'?[this.beacon]:[]);
       for(const a of targets){if(!a.alive)continue;const t=segmentSphere(b,next,{x:a.x,y:a.y+.9+(a.hop??0),z:a.z},a.id==='beacon'?.65:.5);if(t!==null&&t<nearest){nearest=t;blocked=false;hit=a;}}
       this.trails.push({from:{x:b.x,y:b.y,z:b.z},to:{x:b.x+(next.x-b.x)*nearest,y:b.y+(next.y-b.y)*nearest,z:b.z+(next.z-b.z)*nearest},life:.13,friendly:b.friendly});
-      if(hit){const length=Math.hypot(b.vx,b.vz)||1;if(b.friendly)this.combat.damageEntity(hit,b.damage,b.vx/length,b.vz/length,{source:'ally',preserveOpening:true});else this.hitAlly(hit,b.damage,{dx:b.vx/length,dz:b.vz/length});b.life=0;}
+      if(hit){const length=Math.hypot(b.vx,b.vz)||1;if(b.friendly)this.combat.damageEntity(hit,b.damage,b.vx/length,b.vz/length,{source:'ally',preserveOpening:true});else this.hitAlly(hit,b.damage,{dx:b.vx/length,dz:b.vz/length,source:'적의 화살'});b.life=0;}
       b.vy-=(b.gravity??0)*dt;
       if(blocked||next.y<terrainHeight(next.x,next.z))b.life=0;Object.assign(b,next);
     }this.bolts=this.bolts.filter(b=>b.life>0);

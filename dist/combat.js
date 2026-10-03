@@ -2,6 +2,7 @@ import { terrainHeight, overlaps, WORLD_RADIUS } from './movement.js';
 import { Warrior } from './warrior.js';
 import { Forestry } from './forestry.js';
 import { Tactics } from './tactics.js';
+import { Mage } from './mage.js';
 import { BATTLE, bowShot, guardedDamage } from './battle-rules.js';
 
 const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
@@ -30,7 +31,7 @@ export function segmentBox(a,b,box) {
 export class Hunting {
   constructor(colliders=[],trees=[]) {
     this.colliders=colliders;this.entities=[];this.arrows=[];this.events=[];
-    this.weapon='sword';this.cooldown=0;this.swing=0;this.hp=100;this.invincible=0;
+    this.classId='warrior';this.weapon='sword';this.cooldown=0;this.swing=0;this.hp=100;this.invincible=0;
     this.meleeInterval=2;this.meleeCooldown=0;
     this.drawing=false;this.charge=0;this.release=0;this.lastCharge=0;
     this.hurt=0;this.sinceHit=100;this.kills={rabbit:0,slime:0};this.time=0;this.nextArrow=1;
@@ -39,6 +40,7 @@ export class Hunting {
     this.autoMelee={targetId:null,attacks:0};
     this.warrior=new Warrior(this);
     this.tactics=new Tactics(this);
+    this.mage=new Mage(this);
     this.forestry=new Forestry(this,trees);
     const rabbits=[[-3,2],[4,-2],[-5,-10],[10,-11],[-13,5],[12,10]];
     const slimes=[[4,-9],[-2,-17],[12,-22],[-14,-23],[20,-6]];
@@ -50,9 +52,19 @@ export class Hunting {
     }
   }
   equip(weapon) {
-    if(!['axe','sword','bow'].includes(weapon))throw new Error('Unknown weapon');
+    if(!['axe','sword','bow','staff'].includes(weapon))throw new Error('Unknown weapon');
+    if((weapon==='staff')!==(this.classId==='mage'))return false;
     if(weapon!==this.weapon)this.warrior.cancel();
     this.cancelDraw();this.weapon=weapon;this.swing=0;this.release=0;this.autoMelee.targetId=null;this.meleeFacing=null;
+    return true;
+  }
+  chooseClass(id,player){
+    if(!['warrior','mage'].includes(id))return {accepted:false,reason:'전사 또는 마법사를 골라 주세요.'};
+    if(this.hp<=0||!this.village?.isSafe(player)||this.raids?.active||this.sinceHit<6)return {accepted:false,reason:'전투를 마치고 B로 마을에 돌아와 전직하세요.'};
+    if(id===this.classId)return {accepted:true};
+    this.warrior.cancel(true);this.mage.reset();this.tactics.reset();this.cancelDraw();this.arrows=[];
+    this.classId=id;this.equip(id==='mage'?'staff':'axe');this.hp=Math.min(this.hp,this.maxHp);this.cooldown=0;this.meleeCooldown=0;
+    this.village.save();return {accepted:true};
   }
   get maxHp(){return this.progression?.bonuses.maxHp??100;}
   get criticalMultiplier(){return this.progression?.bonuses.critical??2;}
@@ -68,6 +80,7 @@ export class Hunting {
   }
   restorePlayer() {
     this.tactics.reset();
+    this.mage.reset();
     this.cancelDraw();this.warrior.cancel(true);this.hp=this.maxHp;this.invincible=2;this.hurt=0;this.sinceHit=100;this.cooldown=0;this.swing=0;this.release=0;
     this.arrows.length=0;this.lastHit=null;for(const e of this.entities){e.offBalance=0;e.knockback=null;e.lastPush=null;e.hop=0;e.knockX=e.knockZ=0;e.windup=0;e.recovery=Math.max(e.recovery,1);}
     this.autoAttackRecovery=false;this.meleeFacing=null;this.autoMelee={targetId:null,attacks:0};
@@ -75,6 +88,14 @@ export class Hunting {
     for(const tree of this.forestry.trees){tree.offBalance=0;tree.flash=0;}
   }
   targets() { return this.entities.filter(e=>!e.mirrorVeiled).concat(this.forestry.trees); }
+  traceSpell(a,b){
+    let t=1,entity=null,blocked=false;
+    for(const box of this.colliders){if(box.active===false)continue;const hit=segmentBox(a,b,box);if(hit!==null&&hit<=t){t=hit;entity=box.treeId?this.forestry.trees.find(e=>e.id===box.treeId&&e.alive)??null:null;blocked=!entity;}}
+    const ground=terrainHeight(b.x,b.z);
+    if(b.y<=ground){const hit=clamp((a.y-ground)/(a.y-b.y||1),0,1);if(hit<=t){t=hit;entity=null;blocked=true;}}
+    for(const e of this.entities){if(!e.alive||e.mirrorVeiled)continue;const hit=segmentSphere(a,b,{x:e.x,y:e.y+(e.hop??0)+e.height*.5,z:e.z},e.radius+.12);if(hit!==null&&hit<t){t=hit;entity=e;blocked=false;}}
+    return {t,entity,blocked};
+  }
   unobstructed(a,b,ignore=null) { return !this.colliders.some(box=>{if(box===ignore||box.active===false)return false;const t=segmentBox(a,b,box);return t!==null&&t<.99;}); }
   damageEntity(e,damage,dx,dz,context={}) {
     damage=this.talentDamage(e,damage,context);
@@ -86,6 +107,7 @@ export class Hunting {
     if(e.raider){
       if(context.source==='kick'){if(e.boss)this.raids?.boss.interrupt(e);else{e.guardBroken=4;this.events.push({type:'guard-break',x:e.x,y:e.y+2,z:e.z});}}
       if(e.exposed>0)damage=Math.round(damage*1.4);
+      else if(e.stoneArmor)damage=Math.round(damage*(1-e.stoneArmor));
       const guard=guardedDamage(e,damage,dx,dz);damage=guard.damage;
       if(guard.blocked)this.events.push({type:'guard-block',x:e.x,y:e.y+2,z:e.z});
     }
@@ -128,9 +150,10 @@ export class Hunting {
     this.arrows.push({id:this.nextArrow++,x:start.x,y:start.y,z:start.z,vx:ax/n*speed,vy:ay/n*speed,vz:az/n*speed,damage,life:4});
     this.events.push({type:'shoot',charge});return true;
   }
-  attack(player,direction) {
+  attack(player,direction,aimPoint) {
     if(this.tactics.busy)return false;
     if(this.village?.isSafe(player))return false;
+    if(this.weapon==='staff')return this.mage.request('bolt',player,direction,aimPoint).accepted;
     if(this.weapon==='axe') {
       const attacked=this.warrior.basicAttack(player,direction);
       if(attacked)this.autoAttackRecovery=false;
@@ -159,7 +182,7 @@ export class Hunting {
     this.autoMelee.targetId=null;
     const w=this.warrior;
     if(this.tactics.busy || this.village?.isSafe(player) || this.hp<=0 || !player.grounded || !['axe','sword'].includes(this.weapon)
-      || w.active || w.followup || w.queued || (w.combo.step>0 && w.combo.remaining>0))return false;
+      || w.active || w.followup || w.queued || (w.combo.step>0 && w.combo.step<4 && w.combo.remaining>0))return false;
     const range=this.weapon==='axe'?2.7:2.6;
     let target=null,nearest=Infinity;
     // Only creatures initiate auto attack; passing a tree never starts logging.
@@ -187,13 +210,16 @@ export class Hunting {
     }
     return true;
   }
-  damagePlayer(amount) {
-    if(this.tactics.invulnerable){this.tactics.dodged++;return false;}
+  damagePlayer(amount,context={}) {
+    if(this.tactics.invulnerable||this.mage.blinkTime>0){this.tactics.dodged++;return false;}
     if(this.inSanctuary||this.hp<=0||this.invincible>0)return false;
     const bonuses=this.progression?.bonuses;amount=Math.max(1,Math.round((amount-this.armorLevel*2-(bonuses?.reduction??0))*(1-(bonuses?.mitigation??0))*(this.tactics.battlecry>0?BATTLE.battlecry.taken:1)));
+    const healthBefore=this.hp;
+    amount=this.mage.absorb(amount);
+    if(amount===0){this.invincible=.65;this.sinceHit=0;return true;}
     this.hp=Math.max(0,this.hp-amount);this.invincible=.65;this.hurt=.32;this.sinceHit=0;
-    this.events.push({type:'hurt',damage:amount});
-    if(this.hp===0){this.cancelDraw();this.warrior.cancel(false,true);this.events.push({type:'player-defeat'});}
+    this.events.push({type:'hurt',damage:healthBefore-this.hp,healthBefore,health:this.hp,maxHealth:this.maxHp,source:context.source??'적의 공격'});
+    if(this.hp===0){this.cancelDraw();this.warrior.cancel(false,true);this.mage.reset();this.events.push({type:'player-defeat'});}
     return true;
   }
   moveEntity(e,dx,dz) {
@@ -223,6 +249,7 @@ export class Hunting {
     this.invincible=Math.max(0,this.invincible-dt);this.hurt=Math.max(0,this.hurt-dt);this.sinceHit+=dt;
     for(const e of this.entities){e.offBalance=Math.max(0,e.offBalance-dt);e.guardBroken=Math.max(0,(e.guardBroken??0)-dt);}
     this.warrior.update(dt,player);
+    this.mage.update(dt,player);
     this.forestry.update(dt,player);
     if(this.hp>0&&this.sinceHit>6&&!(this.raids?.active&&this.raids.mode==='field'))this.hp=Math.min(this.maxHp,this.hp+4*dt);
     for(const e of this.entities) {
@@ -249,6 +276,7 @@ export class Hunting {
         if(progress>=1){e.knockback=null;e.hop=0;}
         continue;
       }
+      if(e.frozen>0&&!e.ccImmune){e.hop=0;e.moving=false;e.windup=0;continue;}
       if(e.stagger>0){e.stagger=Math.max(0,e.stagger-dt);e.hop=0;e.moving=false;this.moveEntity(e,e.knockX*dt,e.knockZ*dt);e.knockX*=Math.exp(-12*dt);e.knockZ*=Math.exp(-12*dt);continue;}
       if(e.raider){this.moveEntity(e,e.knockX*dt,e.knockZ*dt);e.knockX*=Math.exp(-12*dt);e.knockZ*=Math.exp(-12*dt);continue;}
       const px=player.x-e.x,pz=player.z-e.z,distance=Math.hypot(px,pz),homeDistance=Math.hypot(e.homeX-e.x,e.homeZ-e.z);
@@ -264,7 +292,7 @@ export class Hunting {
         if(e.windup>0){
           e.windup=Math.max(0,e.windup-dt);e.hop=Math.sin((1-e.windup/.5)*Math.PI)*.7;
           if(e.windup===0){
-            if(this.hp>0&&distance<2.2&&Math.abs(player.y-e.y)<1.6&&this.unobstructed({x:e.x,y:e.y+.65,z:e.z},{x:player.x,y:player.y+.7,z:player.z}))this.damagePlayer(12);
+            if(this.hp>0&&distance<2.2&&Math.abs(player.y-e.y)<1.6&&this.unobstructed({x:e.x,y:e.y+.65,z:e.z},{x:player.x,y:player.y+.7,z:player.z}))this.damagePlayer(12,{source:'슬라임 몸통 박치기'});
             e.recovery=1.1;
           }
         } else if(e.alert) {
@@ -278,6 +306,7 @@ export class Hunting {
           e.hop=speed>0?Math.abs(Math.sin(e.phase))*.14:0;
         }
       }
+      if(e.slowed>0&&!e.ccImmune)speed*=.5;
       e.moving=speed>.05;
       this.moveEntity(e,(Math.sin(e.heading)*speed+e.knockX)*dt,(Math.cos(e.heading)*speed+e.knockZ)*dt);
       e.knockX*=Math.exp(-12*dt);e.knockZ*=Math.exp(-12*dt);

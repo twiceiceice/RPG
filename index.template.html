@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#172e2c">
   <meta name="description" content="사냥과 벌목, 그리고 솔바람 마을. 주민들과 거래하고 장비를 보강하며 나만의 들판을 모험하세요.">
-  <title>바람의 들판 — 양손 도끼 전사</title>
+  <title>바람의 들판 — 전사와 마법사</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23172e2c'/%3E%3Cpath d='M7 23L15 7l10 16H7Z' fill='%23cbe49c'/%3E%3Cpath d='M15 7v16h10Z' fill='%237fb7a2'/%3E%3C/svg%3E">
   <link rel="stylesheet" href="./style.css">
 </head>
@@ -14,6 +14,7 @@
   <header class="hud top">
     <div class="identity"><span class="mark" aria-hidden="true">△</span><div><h1>바람의 들판</h1><p>폭풍과 거울의 두 전설</p></div></div>
     <nav class="actions" aria-label="게임 조작">
+      <button id="class-button" title="마을에서 직업 선택 (L)">직업 <kbd>L</kbd></button>
       <button id="talents-button" title="레벨과 특성 (P)">특성 <kbd>P</kbd><span id="talent-badge">1</span></button>
       <button id="build-button" title="건축 모드 (K)" aria-pressed="false">건축 <kbd>K</kbd></button>
       <button id="battle-button" title="야외 보스 토벌 의뢰 (J)">의뢰 <kbd>J</kbd></button>
@@ -25,10 +26,11 @@
     </nav>
   </header>
   <section class="vitals" aria-label="사냥 상태">
-    <div class="class-label"><span id="player-level">Lv. 1 전사</span><span>양손 무기</span></div>
+    <div class="class-label"><span id="player-level">Lv. 1 전사</span><span id="class-weapon">양손 무기</span></div>
     <div class="xp-row"><progress id="xp-meter" value="0" max="60" aria-label="경험치"></progress><span id="xp-value">0 / 60 XP</span></div>
-    <div class="health-label"><span>♥ <span>체력</span></span><strong id="health-value">100 / 100</strong></div>
-    <div id="health-meter" class="health-meter" role="progressbar" aria-label="체력" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><span id="health-fill"></span></div>
+    <div class="health-label"><span>♥ <span id="health-state">체력</span></span><strong id="health-value">100 / 100</strong></div>
+    <div id="health-meter" class="health-meter" role="progressbar" aria-label="체력" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><span id="health-loss" aria-hidden="true"></span><span id="health-fill"></span></div>
+    <div id="health-receipt" role="status" aria-live="polite" aria-atomic="true"></div>
     <div class="hunt-counts"><span>토끼 <b id="rabbit-count">0</b></span><span>슬라임 <b id="slime-count">0</b></span></div>
     <div id="auto-attack-status">근접 자동 공격 · 적 접근 시</div>
     <div class="wallet-row"><span><b id="gold-count">20</b> 골드</span><button id="potion-button" title="체력 45 회복 · H · 재사용 4초">H 물약 1</button></div>
@@ -68,6 +70,7 @@
   <div id="crosshair" aria-hidden="true" hidden></div>
   <div id="bow-charge" hidden><div id="charge-meter" class="charge-track" role="progressbar" aria-label="활 당긴 정도" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span id="charge-fill"></span></div><span id="charge-label">당기는 중 · 놓으면 발사</span></div>
   <div id="damage-flash" aria-hidden="true"></div><div id="combat-fx" aria-hidden="true"></div>
+  <div id="incoming-hit" hidden aria-hidden="true"><span class="incoming-label">받은 피해</span><strong id="incoming-amount"></strong><span id="incoming-source"></span></div>
   <div id="loading" role="status">들판을 불러오는 중…</div>
   <section id="welcome" class="welcome" hidden aria-label="플레이 시작">
     <span class="eyebrow">FIELD HUNTS · 폭풍과 거울</span>
@@ -75,6 +78,7 @@
     <p>번개를 두른 야수, 거울 속 마녀.<br>공명석을 깨우거나 진짜 분신을 간파하며<br>서로 다른 두 보스를 공략하세요.</p>
     <button id="play-button" class="primary">들판으로 <span aria-hidden="true">↗</span></button>
     <button id="village-start" class="secondary">마을에서 의뢰 준비 <span aria-hidden="true">⌂</span></button>
+    <button id="mage-start" class="secondary mage-start">서리불꽃 마법사로 시작 <span aria-hidden="true">✧</span></button>
     <small>B 마을 → J 의뢰 → 토벌 대상 선택</small>
   </section>
   <div id="resume" class="resume" hidden><button id="resume-button">계속 걷기 <kbd>클릭</kbd></button></div>
@@ -84,15 +88,15 @@
   </section>
   <section id="warrior-hud" aria-label="전사 기술">
     <div id="critical-opening" hidden>✦ 비틀거리는 적 · 다음 적중은 치명타 ×2</div>
-    <div id="ultimate-info" class="ultimate-info"><span id="ultimate-status">궁극기 연계 · 0/4 적중</span><progress id="ultimate-charge" max="4" value="0" aria-label="궁극기 연계 진행"></progress></div>
-    <div class="combo-info"><strong id="combo-title">양손 도끼 전사</strong><span id="combo-hint">1 돌진 → 2 내려찍기 → 3 날아차기 → 4 가로베기</span></div>
+    <div id="ultimate-info" class="ultimate-info"><span id="ultimate-status">궁극기 0/100 · 짧게 두 번 / 길게 한 번</span><progress id="ultimate-charge" max="100" value="0" aria-label="궁극기 충전"></progress></div>
+    <div class="combo-info"><strong id="combo-title">양손 도끼 전사</strong><span id="combo-hint">2→4 +50 · 2→3→4 +100 · 1은 접근</span></div>
     <div class="combo-track"><span id="combo-progress"></span></div>
     <div class="skill-bar">
       <button id="skill-charge" class="skill-slot" aria-label="1 돌진" title="1 · 돌진 거리 +50%, 최대 약 10m. 적·장애물 앞에서는 멈춰요. 재사용 4초"><kbd>1</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="m6 10 13 8L6 26m12-16 13 8-13 8M4 18h15"/></svg><strong>돌진</strong><span id="skill-state-charge">준비</span></button>
       <button id="skill-slam" class="skill-slot" aria-label="2 내려찍기" title="2 · 도끼 날을 세워 땅에 꽂기. 피해 39 (+50%)"><kbd>2</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M18 4v20m-6-6 6 6 6-6M4 29l8-3 6 5 6-5 8 3"/></svg><strong>내려찍기</strong><span id="skill-state-slam">준비</span></button>
       <button id="skill-kick" class="skill-slot" aria-label="3 날아차기" title="3 · 발동 순간 바라보는 방향으로 날아차기. 약·중·강에 따라 18·26·36 피해, 3·4.5·6m 밀침. 다음 적중 1회는 2배 피해"><kbd>3</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M8 31V8m-4 3 8-5M8 17l12-5 4 7 8-7M20 12l-1 12 10 4"/><circle cx="22" cy="6" r="2"/></svg><strong>날아차기</strong><span id="skill-state-kick">내려찍기 후</span></button>
       <button id="skill-sweep" class="skill-slot" aria-label="4 가로베기" title="4 · 도끼를 끌어와 발동 순간 바라보는 방향으로 크게 가로베기"><kbd>4</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M5 23Q18 4 32 14M24 7l8 7-9 3M7 30 23 14M7 23q10-9 19-2"/></svg><strong>가로베기</strong><span id="skill-state-sweep">내려찍기 후</span></button>
-      <button id="skill-spin" class="skill-slot ultimate-slot unavailable" aria-label="5 궁극기 회전베기" title="5 · 1~4 순서대로 적중하면 준비. 2.5초 전방향 공격, 3회 연속 적중 시 흡입 강화. 치명타와 처치로 최대 4초까지 연장"><kbd>5</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M29 12A13 13 0 1 0 30 24M29 5v8h-8M22 15a6 6 0 1 0 1 8"/></svg><strong>회전베기</strong><span id="skill-state-spin">0/4 적중</span></button>
+      <button id="skill-spin" class="skill-slot ultimate-slot unavailable" aria-label="5 궁극기 회전베기" title="5 · 충전 100에 준비. 2→4 두 번 또는 2→3→4 한 번 적중. 실수해도 충전 유지. 2.5초 전방향 공격, 3회 연속 적중 시 흡입 강화. 치명타와 처치로 최대 4초까지 연장"><kbd>5</kbd><svg viewBox="0 0 36 36" aria-hidden="true"><path d="M29 12A13 13 0 1 0 30 24M29 5v8h-8M22 15a6 6 0 1 0 1 8"/></svg><strong>회전베기</strong><span id="skill-state-spin">0/100</span></button>
     </div>
     <div class="tactics-row" aria-label="회피와 쿨다운 기술">
       <button id="tactic-evade" class="tactic-button" title="F · 이동 방향으로 약 3.8m 회피. 처음 0.28초 무적 · 재사용 4초 · 진행 중인 공격 취소"><kbd>F</kbd><strong>회피</strong><span id="tactic-state-evade">준비</span></button>
@@ -101,6 +105,7 @@
     <p id="tactics-status">F 이동 방향으로 회피 · 6 중요한 순간에 함성</p>
   </section>
   <div class="weapon-bar" aria-label="무기 선택">
+    <button id="staff-button" class="weapon-slot selected" aria-pressed="true" aria-label="서리불꽃 지팡이 장착" hidden><kbd>Z</kbd><span class="staff-symbol" aria-hidden="true">✧</span><span>지팡이</span></button>
     <button id="axe-button" class="weapon-slot selected" aria-pressed="true" aria-label="양손 도끼 장착"><kbd>Z</kbd><svg viewBox="0 0 32 32" aria-hidden="true"><path d="m7 28 17-23" stroke="#d5a668" stroke-width="3"/><path d="m12 4 7 2 5 5 2 7 5-5-3-7-7-5Z" fill="#dbe9e3"/></svg><span>도끼</span></button>
     <button id="sword-button" class="weapon-slot" aria-pressed="false" aria-label="칼 장착"><kbd>X</kbd><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M23 3 29 3 29 9 13 25 7 19Z" fill="#dbe9e3"/><path d="m6 16 10 10M10 22 4 28" stroke="#e5bc66" stroke-width="4"/></svg><span>칼</span></button>
     <button id="bow-button" class="weapon-slot" aria-pressed="false" aria-label="활 장착"><kbd>C</kbd><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M7 3Q34 16 7 29" fill="none" stroke="#d5a668" stroke-width="3"/><path d="M7 3V29M2 16H28m-4-4 5 4-5 4" fill="none" stroke="#e6e9d7" stroke-width="1.5"/></svg><span>활</span></button>
@@ -127,7 +132,7 @@
     <p id="battle-reason" role="status"></p>
     <div class="hunt-reward"><strong>첫 보고 보상</strong><span id="hunt-first-reward">80 골드 · 나무 12 · 돌 8 · 지붕 4 · 180 XP</span><small id="hunt-repeat-reward">바르칸 처치마다 150 XP · 두 번째부터 12 골드와 돌 2개 즉시 지급</small></div>
     <details class="battle-guide" open><summary id="hunt-guide-title">공략 수첩 · 번개를 무기로 바꾸세요</summary>
-      <ol id="hunt-guide-list"><li><strong>뿔 휩쓸기</strong> — 앞쪽 부채꼴을 피해 옆과 뒤에서 공격.</li><li><strong>번개 낙인</strong> — 따라오는 원을 가장자리로 유도. 원이 멈추면 벗어나기.</li><li><strong>울림의 파동</strong> — 안쪽이 먼저 폭발. 터진 안쪽으로 들어가 바깥 고리 피하기.</li><li><strong>공명석 과부하</strong> — 빛기둥이 솟는 공명석에 내 번개 원을 겹치기. 성공하면 8초간 약점 노출! 받는 피해 +40%.</li></ol>
+      <ol id="hunt-guide-list"><li><strong>뿔 휩쓸기</strong> — 앞쪽 부채꼴을 피해 옆과 뒤에서 공격.</li><li><strong>번개 낙인</strong> — 따라오는 원을 가장자리로 유도. 원이 멈추면 벗어나기. 보라색 잔류 번개도 매초 피해.</li><li><strong>울림의 파동</strong> — 안쪽이 먼저 폭발. 터진 안쪽으로 들어가 바깥 고리 피하기.</li><li><strong>공명석 과부하</strong> — 평소 돌갑옷으로 받는 피해 25% 감소. 빛나는 공명석에 번개를 유도하면 갑옷이 깨지고 8초간 받는 피해 +40%.</li></ol>
     </details>
     <p id="hunt-footnote" class="battle-footnote">공명석을 놓쳐도 다시 기회가 옵니다. 체력 65%·35%에 패턴이 강화되며, 마지막 단계에는 파동과 낙인이 겹칩니다. 분지를 크게 벗어나면 토벌 종료. 현재는 주간 대기 없이 반복 도전할 수 있어요.</p>
     <button id="retreat-button">마을로 돌아가기</button>
@@ -140,8 +145,16 @@
     <div id="trade-offers"></div><p id="trade-message" role="status" aria-live="polite"></p>
     <div class="trade-footer"><span>솔바람 마을 · 대화 중에는 시간이 멈춰요</span><span>Esc 닫기</span></div>
   </dialog>
+  <dialog id="class-dialog" aria-labelledby="class-title">
+    <div class="dialog-heading"><div><span class="eyebrow">솔바람 마을 · 무료 전직</span><h2 id="class-title">어떤 힘으로 싸울까요?</h2></div><button id="close-class" class="icon-button" aria-label="직업 선택 닫기">×</button></div>
+    <div class="class-choices">
+      <button data-class-choice="warrior" aria-pressed="true"><span class="class-art" aria-hidden="true">⚔</span><strong>양손 도끼 전사</strong><span>붙어서 이어가는 묵직한 연계</span><small>2 → 4 짧게 / 2 → 3 → 4 길게<br>F 회피 · 6 전투 함성</small></button>
+      <button data-class-choice="mage" aria-pressed="false"><span class="class-art" aria-hidden="true">❄ ✦</span><strong>서리불꽃 마법사</strong><span>표식을 터뜨리고 불꽃을 저장</span><small>2 서리 → 1 화염 → 이동하며 4 잔불<br>F 점멸 · 6 얼음 방벽</small></button>
+    </div>
+    <p id="class-message" role="status"></p><button id="class-travel" class="primary">마을로 가서 전직하기</button>
+  </dialog>
   <dialog id="talents-dialog" aria-labelledby="talents-title">
-    <div class="dialog-heading"><div><span class="eyebrow">전사의 성장 · 최대 10레벨</span><h2 id="talents-title">나만의 전투 방식</h2></div><button id="close-talents" class="icon-button" aria-label="특성 닫기">×</button></div>
+    <div class="dialog-heading"><div><span id="talents-eyebrow" class="eyebrow">전사의 성장 · 최대 10레벨</span><h2 id="talents-title">나만의 전투 방식</h2></div><button id="close-talents" class="icon-button" aria-label="특성 닫기">×</button></div>
     <div class="talent-summary"><strong id="talent-level">레벨 1</strong><span id="talent-xp"></span><b id="talent-points">남은 포인트 1</b></div>
     <p class="talent-intro">1레벨에 1점, 레벨마다 1점씩. 위 특성을 배워 아래로 이어가세요. 서로 다른 갈래도 함께 고를 수 있어요.</p>
     <div id="talent-tree" class="talent-tree"></div>
@@ -157,7 +170,11 @@
   </dialog>
   <dialog id="help-dialog" aria-labelledby="help-title">
     <div class="dialog-heading"><h2 id="help-title">들판에서 살아남기</h2><button id="close-help" class="icon-button" aria-label="조작법 닫기">×</button></div>
-    <p><strong>F 회피 · 6 전투 함성</strong><br>이동 키와 F를 함께 누르면 그 방향으로 약 3.8m 회피해요. 이동 입력이 없으면 바라보는 방향입니다. 처음 0.28초 동안 피해를 피하며 4초마다 사용할 수 있어요. 현재 공격 동작은 취소하지만 이미 맞힌 연계 단계는 유지해요. 회피 중에는 연계 시간이 멈추고 끝나면 최소 2초를 줍니다. 회피 중 다음 기술을 미리 누르면 이어지고, 도끼를 회수했다면 도끼를 든 날아차기로 연결해요. 타격 전 취소한 기술은 다시 시도할 수 있지만 빗맞힌 공격은 성공으로 세지 않아요. 짧은 경직은 연계를 보존하고 큰 경직은 끊습니다. 준비된 궁극기도 보존해요. 전투 함성은 30초마다 6초간 피해 +35%·받는 피해 −25%를 줍니다. 도끼·칼·활 모두 사용할 수 있으며 기술 연계를 끊지 않아요.</p>
+    <p><strong>L · 전사와 마법사</strong><br>솔바람 마을에서 무료로 전직합니다. 레벨·골드·물약·건축물은 공유하고, 특성은 직업별로 저장합니다. 전직하면 체력은 회복되지 않고 잔불·궁극기 충전은 비워집니다.</p>
+    <p><strong>서리불꽃 마법사 · 2 → 1 → 4</strong><br>2 서리창으로 6초 표식을 남기고, 1 화염구로 터뜨리면 치명타와 잔불 1개를 얻어요. 화염구는 0.8초 멈춰서 영창하며 이동·점프·F 점멸로 발사 전에 취소하면 대기시간이 생기지 않아요. 잔불은 최대 2개, 이동해도 유지되며 4 불꽃 쇄도로 즉시 발사합니다. 좌클릭 마력탄도 이동 중 사용할 수 있어요. 주문 사거리는 12m, 벽과 기둥이 막습니다.</p>
+    <p><strong>마법사의 제어와 생존</strong><br>3 서리 고리는 주변 4.5m에 표식을 남기고 일반 적을 1.6초 묶어요. 보스의 움직임과 패턴은 멈추지 않습니다. F는 이동 방향 5m 점멸, 벽 앞에서 멈추고 잠깐 무적이 됩니다. 6 얼음 방벽은 8초간 피해 30을 흡수해요. 적중으로 원소 충전 100을 모으면 5 원소 해방: 8초간 이동하면서 화염구를 즉시 시전합니다. 해방 중에는 충전하지 않아요. R·사망·전직·새로고침은 잔불과 원소 충전을 초기화합니다.</p>
+
+    <p><strong>F 회피 · 6 전투 함성</strong><br>이동 키와 F를 함께 누르면 그 방향으로 약 3.8m 회피해요. 이동 입력이 없으면 바라보는 방향입니다. 처음 0.28초 동안 피해를 피하며 4초마다 사용할 수 있어요. 현재 공격 동작은 취소하지만 이미 맞힌 연계 단계는 유지해요. 회피 중에는 연계 시간이 멈추고 끝나면 최소 2초를 줍니다. 회피 중 다음 기술을 미리 누르면 이어지고, 도끼를 회수했다면 가로베기로 마무리하거나 날아차기로 길게 이어 갈 수 있어요. 타격 전 취소한 기술은 다시 시도할 수 있지만 빗맞힌 공격은 성공으로 세지 않아요. 짧은 경직은 연계를 보존하고 큰 경직은 끊습니다. 모으던 궁극기 충전도 보존해요. 전투 함성은 30초마다 6초간 피해 +35%·받는 피해 −25%를 줍니다. 도끼·칼·활 모두 사용할 수 있으며 기술 연계를 끊지 않아요.</p>
     <p><strong>아군과 적군 · 같은 세 전투 역할</strong><br>방패병은 정면 피해를 65% 줄이고 돌진해요. 옆이나 뒤를 노리거나 날아차기로 방패를 4초간 무너뜨리세요. 전사는 돌진·내려찍기·가로베기를 사용하고, 궁수는 조준 사격과 후방 회피를 사용합니다. 전투병의 기술은 플레이어와 범위·재사용 규칙을 공유하고 피해량은 별도 조정돼요. 붉은 표시는 적, 청록 표시는 아군입니다. 궁수의 조준선은 발사 전에 고정되므로 옆으로 피할 수 있어요. 적 돌진에는 추가 준비 동작이 있어요. 날아차기와 경직으로 적 기술을 끊을 수 있습니다.</p>
     <p><strong>P · 레벨과 특성</strong><br>최대 10레벨. 사냥·벌목·보스 토벌로 경험치를 얻고, 처음 1점과 레벨마다 1점씩 총 10점을 배워요. 세 갈래의 위 특성을 1점 이상 배워야 아래로 이어지며, 3·5·8레벨에 다음 줄이 열립니다. 서로 다른 갈래를 함께 고를 수 있고 마을에서 무료 초기화가 가능해요. 거래·건축 반복에는 경험치가 없어요. 새로고침해도 경험치와 특성이 유지됩니다.</p>
     <p><strong>♫ · 소리</strong><br>플레이를 시작하면 잔잔한 음악이 반복됩니다. 공격마다 효과음이 달라요. 소리 설정에서 음악과 효과음의 크기를 따로 조절하거나 모두 끌 수 있어요.</p>
@@ -168,16 +185,18 @@
     <p><strong>사냥과 벌목으로 거래하기</strong><br>토끼는 3 골드, 슬라임은 5 골드를 줘요. 목재 상인 미라는 목재를 2 골드에 사고 4 골드에 팔아요. 약초상 나리에게 12 골드로 물약을 사면 <strong>H</strong>로 체력 45를 회복할 수 있어요. 대장장이 도윤은 20 / 35 / 50 골드로 갑옷을 보강해 단계마다 받는 피해를 2씩 줄여 줘요. 여관 주인 보리에게 5 골드를 내면 체력을 전부 회복합니다.</p>
     <p><strong>건축 자재상 호두 · 구매·판매·물물교환</strong><br>여관 옆의 작은 집 앞에서 나무·돌·지붕 블록을 5개씩 살 수 있어요. 가격은 각각 10 / 15 / 20 골드이며, 5개씩 팔면 5 / 5 / 10 골드를 받아요. 목재 2개를 나무 블록 5개로 교환할 수도 있어요. 채집 대신 사냥 보상으로 자재를 사도 됩니다. K 건축 모드에서 부지를 선택해 이동하세요. 1 나무·2 돌·3 지붕을 고르고 화면 중앙을 조준해 좌클릭으로 놓고 우클릭으로 회수해요. Q/E나 우클릭 드래그로 시점을 돌릴 수 있어요. 최대 8층·600개까지, 회수하면 자재가 그대로 돌아옵니다. 제작은 아직 없어요.</p>
     <p>처음 시작할 때 20 골드와 물약 1개를 받아요. 골드·목재·물약·갑옷·손잡이 강화·건축물·경험치·특성은 <strong>이 브라우저에 자동 저장</strong>되어 새로고침해도 유지됩니다. 다른 브라우저와는 공유되지 않고, 사이트 데이터를 지우면 초기화돼요. 저장이 차단된 브라우저에서는 이번 플레이 동안 유지됩니다.</p>
-    <p><strong>벌목 · 같은 공격, 새로운 보상</strong><br>나무를 향해 기본 공격이나 1~5 기술을 쓰세요. 줄기가 흔들리고 금이 가다가 체력이 다하면 쓰러져요. 날아차기는 나무에 균열을 내서 4초 안의 다음 적중을 2배로 만들어요. 나무 적중도 4연계와 회전베기 강화에 인정됩니다. 뿌리박힌 나무는 밀리거나 끌려오지 않아요.</p>
+    <p><strong>벌목 · 같은 공격, 새로운 보상</strong><br>나무를 향해 기본 공격이나 1~5 기술을 쓰세요. 줄기가 흔들리고 금이 가다가 체력이 다하면 쓰러져요. 날아차기는 나무에 균열을 내서 4초 안의 다음 적중을 2배로 만들어요. 나무 적중도 궁극기 충전과 회전베기 강화에 인정됩니다. 뿌리박힌 나무는 밀리거나 끌려오지 않아요.</p>
     <p>작은 나무는 <strong>목재 4개</strong>, 굵은 나무는 <strong>6개</strong>를 떨어뜨려요. 치명타로 마지막 일격을 넣으면 <strong>2개 추가</strong>! 3m 안의 목재는 자동으로 줍고, 2단계 회전베기는 6m 안의 목재도 끌어모아요. 칼과 활로도 벨 수 있지만 나무 피해는 절반이에요. 베어낸 나무는 60초 뒤, 주변에 아무도 없으면 다시 자라요.</p>
     <p><strong>T · 손잡이 강화</strong><br>목재 12 / 24 / 36개로 세 번 강화해요. 단계마다 도끼의 벌목 피해 +15%, 최대 +45%입니다. 목재와 강화는 사망·R·새로고침에도 유지돼요.</p>
     <dl><div><dt>이동</dt><dd>W A S D / 방향키</dd></div><div><dt>시점 회전</dt><dd>우클릭 드래그 / Q E</dd></div><div><dt>전사 기술</dt><dd>1 돌진 · 2 내려찍기<br>3 날아차기 · 4 가로베기<br>5 궁극기 회전베기</dd></div><div><dt>도끼 / 칼 / 활</dt><dd>Z / X / C</dd></div><div><dt>기본 공격</dt><dd>좌클릭 · F는 회피</dd></div><div><dt>달리기 / 점프</dt><dd>Shift / Space</dd></div><div><dt>1·3인칭 전환</dt><dd>V</dd></div><div><dt>카메라 거리</dt><dd>마우스 휠</dd></div><div><dt>위치·체력 회복</dt><dd>R</dd></div><div><dt>쉬기 / 마우스 해제</dt><dd>Esc</dd></div></dl>
+    <p><strong>내가 맞았을 때</strong><br>조준점 옆 붉은 <strong>받은 피해</strong> 표시에 실제로 잃은 체력과 공격 이름이 나와요. 체력 바의 살구색 구간은 방금 잃은 체력이며, 잠시 뒤 줄어듭니다. 체력 아래에서도 최근 피격을 확인할 수 있어요. 체력이 30% 이하이면 위험 표시가 켜져요. 적에게 준 피해는 기존처럼 적 위의 밝은 숫자로 표시됩니다.</p>
     <p><strong>근접 자동 공격 · 2초 간격</strong><br>도끼·칼을 들고 적의 근접 사거리에 들어가면 가까운 적을 향해 2초마다 자동으로 기본 공격해요. 좌클릭도 같은 공격 간격을 공유해요. 이동은 그대로 가능하고, 기술 키를 누르면 자동 공격보다 먼저 실행해요. 스킬 동작·박힌 도끼·연계 대기 중에는 자동 공격이 기다립니다. 적이 멀어지거나 벽에 가리면 새 공격을 시작하지 않아요. 나무는 좌클릭 또는 기술로 직접 베세요.</p>
     <p>1번 돌진은 거리가 50% 늘어 최대 약 10m, 내려찍기는 <strong>26 → 39 피해</strong>로 강해졌어요. 4번은 도끼를 끌어온 뒤 낮게 버티고 온몸으로 크게 베며 넓은 금빛 궤적을 남겨요.</p>
     <p>내려찍기로 도끼를 박으면 날아차기와 가로베기를 쓸 수 있어요. 네 동작이 약 3.2초로 빨라졌어요. 공격·회피 중 다음 기술을 미리 한 번 눌러 동작을 이어 보세요. 3·4번은 발동하는 순간 바라보는 방향으로 나가요. 예약한 뒤에도 마우스·Q/E·터치 시점으로 방향을 고를 수 있고, 방향을 바꾸지 않으면 직선으로 이어져요. 가만히 있으면 약 3초간 연계할 수 있고, 이동·점프·무기 변경으로 도끼를 회수할 수 있어요. 아래 기술 버튼을 직접 눌러도 됩니다.</p>
-    <p><strong>5 · 궁극기 회전베기</strong><br>1 → 2 → 3 → 4를 순서대로 각각 적에게 맞히면 궁극기가 준비돼요. 대상이 달라도 되고, 약·중·강 발차기 모두 인정돼요. 빗나감, 순서 변경, 기술 종료 후 3초 초과, 일반 이동으로 도끼 회수·무기 변경·큰 경직은 진행 중인 연계를 끊어요. 회피와 짧은 경직은 이미 적중한 단계를 보존해요. 발동되지 않은 키 입력과 일반 피격은 괜찮아요. 준비된 궁극기는 이동·피격·회피·무기 변경에도 보관되고, 사망·R로 초기화돼요.</p>
+    <p><strong>짧게 마무리할까, 길게 이어 갈까?</strong><br>위험한 패턴이 오면 <strong>2 → 4</strong>로 빠르게 마무리하세요. 모두 맞히면 궁극기가 <strong>50</strong> 충전돼요. 공격할 틈이 넉넉하면 <strong>2 → 3 → 4</strong>로 더 큰 피해를 주고 <strong>100</strong>을 충전하세요. <strong>1 돌진은 멀리 있는 적에게 접근할 때</strong> 쓰면 돼요. 적중하면 10이 더 쌓입니다. 2·3·4는 적중 시 각각 20, 짧은 연계 완성은 추가 10, 긴 연계 완성은 추가 40이에요. 여러 적을 맞혀도 기술 한 번에 한 번만 충전됩니다.</p>
+    <p><strong>5 · 모아서 쓰는 궁극기</strong><br>충전 100이면 회전베기 1회를 보관하고 원하는 때 5번으로 쓰세요. 대상이 달라도 되고, 약·중·강 발차기 모두 인정돼요. 빗나감, 기술 종료 후 3초 초과, 일반 이동으로 도끼 회수·무기 변경·큰 경직은 진행 중인 연계를 끊지만 <strong>이미 모은 충전은 남아요.</strong> 다음에는 2번부터 새 연계를 시작할 수 있어요. 회피와 짧은 경직은 적중한 단계도 보존하므로 2 → F → 4로 짧게 마무리할 수 있어요. 발동되지 않은 입력은 괜찮아요. 궁극기 사용·사망·R·새로고침은 충전을 초기화합니다.</p>
     <p>회전베기는 <strong>기본 2.5초</strong> 동안 이동하며 주변을 0.25초마다 공격해요. 1단계는 8 피해, <strong>3회 연속 적중하면 2단계</strong>로 강화돼 6m 안의 적을 끌어당기며 10 피해를 줍니다. 공격 범위는 3.2m이며 벽 너머는 공격하거나 당기지 않아요. 한 번에 여러 적을 맞혀도 연속 적중은 1회로 세고, 빗나가면 연속 횟수가 초기화돼요.</p>
-    <p><strong>매 3번째 연속 적중은 치명타 · 2배 피해.</strong> 기존 비틀거림과 중복해 4배가 되지는 않아요. 치명타가 난 회전 공격 1회당 +0.25초, 처치한 적 1마리당 +0.5초를 얻으며 전체 지속시간은 <strong>최대 4초</strong>예요. 2단계는 빗나가도 유지되고, 다시 쓰려면 4연계를 새로 성공해야 해요.</p>
+    <p><strong>매 3번째 연속 적중은 치명타 · 2배 피해.</strong> 기존 비틀거림과 중복해 4배가 되지는 않아요. 치명타가 난 회전 공격 1회당 +0.25초, 처치한 적 1마리당 +0.5초를 얻으며 전체 지속시간은 <strong>최대 4초</strong>예요. 2단계는 빗나가도 유지되고, 다시 쓰려면 게이지를 새로 모아야 해요. 회전베기 자체로는 충전되지 않아요.</p>
     <p>날아차기는 도끼를 짚고 앞으로 약 3m 날아가요. 적중할 때 약·중·강이 정해지며 각각 <strong>18·26·36 피해 / 3·4.5·6m 밀침</strong>을 줍니다. 강한 발차기가 오래 안 나오면 나올 확률이 높아져요. 빗나간 공격은 이 확률을 바꾸지 않고, 장애물에 막히면 밀리는 거리가 줄어요. 4번을 누르면 현재 위치에서 도끼를 끌어와 앞으로 크게 베어요.</p>
     <p>날아차기에 맞은 적은 4초간 비틀거려요. 머리 위에 금빛 표시가 있는 동안 그 적에게 다음 공격을 맞히면 <strong>한 번만 치명타 · 2배 피해</strong>가 들어갑니다. 가로베기뿐 아니라 기본 공격·칼·화살도 가능해요. 빗나가도 기회가 사라지지 않지만, 4초가 지나면 끝나요.</p>
     <p>활은 좌클릭을 누르고 당긴 뒤, 놓으면 발사해요. 약 1초간 가득 당기면 더 빠르고 강하게 날아가요. 당기는 동안에도 화면 중앙으로 조준할 수 있고, 화살은 무제한이에요. 무기 변경이나 일시정지로 당기기를 취소할 수 있어요.<br>슬라임은 가까워지면 공격해요. 6초 동안 맞지 않으면 체력이 회복돼요. 사냥한 대상은 잠시 뒤 다시 나타나요.<br>터치: 왼쪽 패드 이동 · 오른쪽 화면 시점 · 당기기 버튼을 누르고 있다 놓아 발사</p>

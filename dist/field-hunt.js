@@ -33,7 +33,7 @@ export class FieldHunt extends Raids {
     if(this.combat.hp<=0)return '먼저 다시 일어나 주세요.';
     if(!this.quest.accepted)return 'B로 마을에 돌아가 J 의뢰를 받아 주세요.';
     if(distance(player,this.arena)>this.arena.radius)return `${this.arena.travelLabel}한 뒤 ${this.arena.shortName}에게 도전하세요.`;
-    if(this.combat.tactics?.busy||this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 시작해 주세요.';
+    if(this.combat.tactics?.busy||this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing||this.combat.mage.cast||this.combat.mage.projectiles.length)return '동작을 마친 뒤 시작해 주세요.';
     if(this.combat.sinceHit<6)return '잠시 숨을 고른 뒤 시작해 주세요.';
     return null;
   }
@@ -83,7 +83,7 @@ export class FieldHunt extends Raids {
     if(!this.active)return;this.phase=won?'victory':'defeat';const q=this.quest,first=won&&q.clears===0,reward=won&&!first?{...this.arena.repeatReward}:null;
     if(won){q.clears=Math.min(99999,q.clears+1);q.bestTime=q.bestTime===null?this.elapsed:Math.min(q.bestTime,this.elapsed);if(reward)this.award(reward);this.village.save();}
     this.result={won,huntId:this.selected,name:this.arena.shortName,mode:'field',reason,reward,first,elapsed:+this.elapsed.toFixed(1),bossStats:{...this.boss.stats}};
-    this.cleanup();this.combat.warrior.cancel();this.combat.cancelDraw();
+    this.cleanup();this.combat.warrior.cancel();this.combat.mage.clearCombat();this.combat.cancelDraw();
     this.combat.events.push({type:'raid-result',message:won?(first?`${this.arena.shortName} 토벌 성공! 마을에서 첫 의뢰 보상을 받으세요.`:`${this.arena.shortName} 재토벌 · ${reward.gold} 골드와 돌 ${reward.stone}개 획득`):reason});
   }
   state(){return {huntId:this.selected,arena:this.arena.name,active:this.active,mode:'field',phase:this.phase,elapsed:+this.elapsed.toFixed(1),order:this.order,result:this.result,quest:{...this.quest},boss:this.boss.state(),allies:this.allies.map(a=>({id:a.id,name:a.name,alive:a.alive,health:Math.ceil(a.hp),maxHp:a.maxHp,healCharges:a.healCharges,avoiding:!!a.avoiding})),enemies:this.enemies.map(e=>({id:e.id,name:e.name,health:e.hp,alive:e.alive,x:e.x,z:e.z}))};}

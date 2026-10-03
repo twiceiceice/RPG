@@ -15,7 +15,7 @@ export class MirrorBoss extends RaidBoss {
   }
   notice(pattern,message){this.raids.combat.events.push({type:'boss-warning',pattern,message});}
   attach(unit){this.clear();this.unit=unit;unit.boss=true;unit.ccImmune=true;unit.exposed=0;unit.mirrorVeiled=false;this.notice('arrival','리세아가 나타났어요 · 기둥 뒤로 숨고, 그림자가 있는 진짜를 찾으세요');}
-  addHazard(data,pattern){const rule=PATTERNS[pattern],h={id:++this.serial,age:0,delay:rule.windup,life:.4,damage:rule.damage,pattern,fired:false,nextTick:0,...data};this.hazards.push(h);return h;}
+  addHazard(data,pattern){const rule=PATTERNS[pattern],h={id:++this.serial,age:0,delay:rule.windup,life:.4,damage:rule.damage,source:rule.name,pattern,fired:false,nextTick:0,...data};this.hazards.push(h);return h;}
   removeProjections(){
     for(const e of this.projections??[]){e.alive=false;e.hp=0;}
     if(this.raids?.combat)this.raids.combat.entities=this.raids.combat.entities.filter(e=>!e.mirrorProjection);
@@ -66,9 +66,9 @@ export class MirrorBoss extends RaidBoss {
   coverGoal(target){
     const u=this.unit;return PILLARS.map(p=>{const d=Math.hypot(p.x-u.x,p.z-u.z)||1;return {x:p.x+(p.x-u.x)/d*2.3,z:p.z+(p.z-u.z)/d*2.3};}).filter(p=>this.raids.nav.clear(p.x,p.z)).sort((a,b)=>Math.hypot(a.x-target.x,a.z-target.z)-Math.hypot(b.x-target.x,b.z-target.z))[0];
   }
-  hit(h,target,amount){
+  hit(h,target,amount,ongoing=false){
     if(h.requiresCover&&inHazard(h,target)&&this.covered(target)){if(target.id==='player')this.stats.coverSuccess++;return;}
-    super.hit(h,target,amount);
+    super.hit(h,target,amount,ongoing);
   }
   avoid(unit,index,dt){
     const flash=this.hazards.find(h=>h.requiresCover&&!h.fired&&h.age>.5);
@@ -100,7 +100,7 @@ export class MirrorBoss extends RaidBoss {
       h.age+=dt;
       if(h.rotationSpeed&&h.age>=h.delay){const a=h.angle+(h.age-h.delay)*h.rotationSpeed;h.dx=Math.sin(a);h.dz=Math.cos(a);}
       if(!h.fired&&h.age>=h.delay){h.fired=true;h.nextTick=h.delay+(h.tickInterval??1);for(const t of this.raids.friendlies(player))this.hit(h,t,h.damage);this.raids.combat.events.push({type:'boss-impact',x:h.x,y:terrainHeight(h.x,h.z),z:h.z});}
-      if(h.fired&&h.burn&&h.age>=h.nextTick&&h.age<h.delay+h.life){h.nextTick+=h.tickInterval??1;for(const t of this.raids.friendlies(player))this.hit(h,t,h.burn);}
+      if(h.fired&&h.burn&&h.age>=h.nextTick&&h.age<h.delay+h.life){h.nextTick+=h.tickInterval??1;for(const t of this.raids.friendlies(player))this.hit(h,t,h.burn,true);}
     }
     this.hazards=this.hazards.filter(h=>h.age<h.delay+h.life);
   }

@@ -40,7 +40,13 @@ export class GameAudio{
     if(!this.context||this.context.state!=='running'||!this.playing||!this.settings.enabled||document.hidden)return;
     const t=this.context.currentTime,skill=event.skill,type=event.type;
     const group=type==='hit'?'hit':type;if(t-(this.last[group]??-100)<(type==='hit'?.075:.025))return;this.last[group]=t;
-    if(type==='boss-warning'){this.tone(event.pattern==='horn'?360:190,t,.26,.14,'triangle',this.effects,event.pattern==='horn'?540:140);this.tone(250,t+.22,.20,.1,'sine');}
+    if(type==='mage-cast')this.tone(220,t,.65,.09,'sine',this.effects,660);
+    else if(type==='mage-shoot'){const ice=skill==='frost';this.tone(ice?960:340,t,.18,.12,'triangle',this.effects,ice?520:130);this.noiseSound(t,.16,.1,ice?3100:800,ice?1600:200);}
+    else if(type==='mage-shatter'){this.tone(1200,t,.24,.13,'sine',this.effects,480);this.noiseSound(t,.2,.14,2600,800);}
+    else if(type==='mage-blink')this.tone(620,t,.24,.12,'sine',this.effects,180);
+    else if(type==='mage-ring'||type==='mage-barrier'||type==='mage-absorb')this.tone(830,t,.3,.1,'triangle',this.effects,440);
+    else if(type==='mage-surge'||type==='mage-ready'){[0,7,12].forEach((n,i)=>this.tone(440*2**(n/12),t+i*.1,.4,.1,'sine'));}
+    else if(type==='boss-warning'){this.tone(event.pattern==='horn'?360:190,t,.26,.14,'triangle',this.effects,event.pattern==='horn'?540:140);this.tone(250,t+.22,.20,.1,'sine');}
     else if(type==='boss-impact'){this.tone(80,t,.35,.2,'sine',this.effects,30);this.noiseSound(t,.24,.16,550,90);}
     else if(type==='evade')this.noiseSound(t,.22,.22,1700,350);
     else if(type==='battlecry'||type==='soldier-buff'){this.tone(130,t,.55,.22,'triangle',this.effects,220);this.tone(195,t+.05,.45,.12,'sine',this.effects,330);}
@@ -59,7 +65,7 @@ export class GameAudio{
     else if(type==='shoot'){this.tone(520,t,.16,.23,'triangle',this.effects,130);this.noiseSound(t,.12,.12,3500,1200);}
     else if(type==='hit'&&event.source!=='ally'){this.noiseSound(t,.11,.14,event.kind==='tree'?450:900,150);if(event.critical)this.tone(1100,t,.18,.12,'triangle',this.effects,440);}
     else if(type==='spin-pulse')this.noiseSound(t,.20,.19,event.stage===2?1400:900,350);
-    else if(type==='hurt')this.tone(95,t,.20,.24,'triangle',this.effects,40);
+    else if(type==='hurt'){this.noiseSound(t,.09,.3,1800,280);this.tone(130,t,.23,.35,'triangle',this.effects,45);}
     else if(type==='tree-felled'){this.noiseSound(t,.5,.3,650,90);this.tone(110,t,.45,.15,'triangle',this.effects,35);}
     else if(type==='level-up'||type==='ultimate-ready'){[0,4,7,12].forEach((n,i)=>this.tone(440*2**(n/12),t+i*.11,.40,.12,'sine'));}
     else if(type==='build-place'||type==='build-remove'){this.noiseSound(t,.1,.17,350,150);this.tone(type==='build-place'?220:160,t,.12,.13,'triangle');}

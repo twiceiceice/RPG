@@ -31,12 +31,13 @@ export class Village {
         const q=data[key];
         if(q&&typeof q==='object'){const clears=integer(q.clears,0,99999);this[key]={accepted:q.accepted===true||clears>0,clears,rewardClaimed:clears>0&&q.rewardClaimed===true,bestTime:clears>0&&Number.isFinite(q.bestTime)&&q.bestTime>0?q.bestTime:null};}
       }
+      this.combat.classId=data.classId==='mage'?'mage':'warrior';this.combat.equip(this.combat.classId==='mage'?'staff':'axe');
       this.progression.load(data.progression);this.structures=Array.isArray(data.structures)?data.structures.slice(0,600):[];
     } catch { this.storageAvailable=false;this.saveBlocked=true; }
   }
   save() {
     if(this.saveBlocked)return;
-    const payload=JSON.stringify({version:1,gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,wood:this.combat.forestry.wood,handleLevel:this.combat.forestry.level,blocks:this.blocks,raidWins:this.raidWins,huntQuest:this.huntQuest,mirrorQuest:this.mirrorQuest,progression:this.progression.serialize(),structures:this.structures});
+    const payload=JSON.stringify({version:1,classId:this.combat.classId,gold:this.gold,potions:this.potions,armorLevel:this.armorLevel,wood:this.combat.forestry.wood,handleLevel:this.combat.forestry.level,blocks:this.blocks,raidWins:this.raidWins,huntQuest:this.huntQuest,mirrorQuest:this.mirrorQuest,progression:this.progression.serialize(),structures:this.structures});
     if(payload===this.lastSaved)return;
     try {if(this.storage){this.storage.setItem(SAVE_KEY,payload);this.storageAvailable=true;}this.lastSaved=payload;}
     catch {this.storageAvailable=false;}
@@ -56,7 +57,7 @@ export class Village {
     if(!n)return '주민을 찾을 수 없어요.';
     if(this.raids?.active)return '전투가 끝나면 주민과 거래할 수 있어요.';
     if(this.combat.hp<=0)return '먼저 다시 일어나 주세요.';
-    if(this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 말을 걸어 주세요.';
+    if(this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing||this.combat.mage.cast||this.combat.mage.projectiles.length)return '동작을 마친 뒤 말을 걸어 주세요.';
     if(Math.hypot(n.x-player.x,n.z-player.z)>VILLAGE.interactionRange||Math.abs(n.y-player.y)>1.5)return '주민에게 조금 더 가까이 가세요.';
     if(!this.combat.unobstructed({x:player.x,y:player.y+1.2,z:player.z},{x:n.x,y:n.y+1.2,z:n.z}))return '주민이 보이는 곳에서 말을 걸어 주세요.';
     return null;
@@ -115,7 +116,7 @@ export class Village {
   travelReason(player) {
     if(this.raids?.active)return '전투 중에는 이동할 수 없어요. 전투 메뉴에서 철수할 수 있어요.';
     if(this.combat.hp<=0)return '먼저 다시 일어나 주세요.';
-    if(this.combat.tactics?.busy||this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing)return '동작을 마친 뒤 이동해 주세요.';
+    if(this.combat.tactics?.busy||this.combat.warrior.active||this.combat.warrior.planted||this.combat.drawing||this.combat.mage.cast||this.combat.mage.projectiles.length)return '동작을 마친 뒤 이동해 주세요.';
     if(this.combat.sinceHit<6||this.combat.entities.some(e=>e.alive&&e.kind==='slime'&&Math.hypot(e.x-player.x,e.z-player.z)<8))return '적에게서 벗어난 뒤 마을로 이동할 수 있어요.';
     return null;
   }

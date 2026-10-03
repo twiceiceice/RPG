@@ -2,9 +2,12 @@ import * as THREE from './vendor/three.module.js';
 import { Movement, terrainHeight } from './movement.js';
 import { createEnvironment, createAvatar } from './environment.js';
 import { Hunting } from './combat.js';
+import { PlayerFeedback } from './player-feedback.js';
 import { HuntingView } from './hunting-view.js';
-import { WARRIOR_SKILLS, warriorMotionTime } from './warrior.js';
+import { WARRIOR_SKILLS, warriorMotionTime, ULTIMATE_CHARGE } from './warrior.js';
 import { WarriorView } from './warrior-view.js';
+import { MAGE_SKILLS, MAGE_TACTICS } from './mage.js';
+import { MageView } from './mage-view.js';
 import { ForestryView } from './forestry-view.js';
 import { Village } from './village.js';
 import { VILLAGE, BUILDING_BLOCKS, BUILD_PLOTS, plotAt } from './village-data.js';
@@ -13,7 +16,7 @@ import { FieldHunt } from './field-hunt.js';
 import { createFieldScenery, FieldHuntView } from './field-view.js';
 import { HUNTS } from './field-data.js';
 import {createMirrorScenery,MirrorHuntView} from './mirror-view.js';
-import { TALENTS, TALENT_BRANCHES } from './progression.js';
+import { TALENTS } from './progression.js';
 import { GameAudio } from './audio.js';
 import { Building } from './building.js';
 import { BuildingView } from './building-view.js';
@@ -47,6 +50,7 @@ const hunting = new Hunting(environment.colliders, environment.trees);
 const forestry = hunting.forestry;
 let localSave=null;try{localSave=window.localStorage;}catch{/* Private browsing may disable storage. */}
 const village=new Village(hunting,localSave);
+const playerFeedback=new PlayerFeedback(hunting.hp,hunting.maxHp);
 const progression=village.progression;
 const audio=new GameAudio(localSave);
 const building=new Building(village,environment.colliders);
@@ -59,6 +63,9 @@ const raidView=new FieldHuntView(scene,raids,huntingView,raidScenery);
 const mirrorView=new MirrorHuntView(scene,raids,huntingView,mirrorScenery);
 const warrior = hunting.warrior;
 const warriorView = new WarriorView(scene, camera, avatar, warrior);
+const mage=hunting.mage;
+const mageView=new MageView(scene,camera,avatar,mage);
+const warriorButtonTitles=WARRIOR_SKILLS.map(s=>$('skill-'+s.id).title);
 const battleAura=new THREE.Mesh(new THREE.RingGeometry(.8,1,48),new THREE.MeshBasicMaterial({color:0xffc363,transparent:true,opacity:.6,side:THREE.DoubleSide,depthWrite:false}));battleAura.rotation.x=-Math.PI/2;battleAura.visible=false;scene.add(battleAura);
 const coarsePointer = matchMedia('(pointer:coarse)').matches;
 const keys = new Set();
@@ -92,18 +99,25 @@ function tacticDirection(choice='movement'){
 }
 function useTactic(id,direction='movement'){
   if(!started||paused||menuOpen()||buildingMode)return {accepted:false,reason:'건축과 메뉴를 닫고 플레이를 이어 가 주세요.'};
+  if(hunting.classId==='mage')return useMageSkill(id==='evade'?'blink':'barrier',direction);
   const result=hunting.tactics.request(id,player,tacticDirection(direction));
   if(result.accepted){if(id==='evade')clearDrawOwner();else notify('전투 함성 · 6초간 피해 +35% · 받는 피해 −25%');}else notify(result.reason);
   updateHUD();return result;
 }
 function updateTacticsHUD(){
+  if(hunting.classId==='mage'){
+    for(const [id,spell] of [['evade','blink'],['battlecry','barrier']]){const b=$('tactic-'+id),s=MAGE_TACTICS[spell];b.querySelector('strong').textContent=s.name;b.title=spell==='blink'?'F · 이동 방향으로 5m 점멸 · 벽과 기둥 앞에서 멈춤 · 6초 재사용':'6 · 8초간 피해 30 흡수 · 18초 재사용';b.disabled=!started||paused||buildingMode||!!mage.reason(spell,player);b.classList.toggle('active',spell==='barrier'?mage.shield>0:mage.blinkTime>0);b.style.setProperty('--cooldown',`${mage.cooldowns[spell]/s.cooldown*100}%`);$('tactic-state-'+id).textContent=spell==='barrier'&&mage.shield>0?`흡수 ${mage.shield}`:mage.cooldowns[spell]>0?`${mage.cooldowns[spell].toFixed(1)}초`:'준비';}
+    $('tactics-status').textContent='F 점멸 · 6 얼음 방벽';return;
+  }
   const t=hunting.tactics;
+  $('tactic-evade').querySelector('strong').textContent='회피';$('tactic-battlecry').querySelector('strong').textContent='전투 함성';
+  $('tactic-evade').title='F · 이동 방향으로 회피 · 재사용 4초';$('tactic-battlecry').title='6 · 6초간 피해 +35% · 받는 피해 −25%';
   for(const id of ['evade','battlecry']){const button=$('tactic-'+id),active=id==='evade'?!!t.dodge:t.battlecry>0,seconds=t.cooldowns[id];button.classList.toggle('active',active);button.disabled=!started||paused||buildingMode||!!t.reason(id,player);button.style.setProperty('--cooldown',`${seconds/BATTLE[id].cooldown*100}%`);$('tactic-state-'+id).textContent=active?(id==='evade'?'회피 중':`${t.battlecry.toFixed(1)}초 강화`):seconds>0?`${seconds.toFixed(1)}초`:'준비';}
   $('tactics-status').textContent=t.stagger>0?'경직 · 잠시 후 행동 가능':t.battlecry>0?'공격 +35% · 받는 피해 −25%':'F 이동 방향으로 회피 · 6 중요한 순간에 함성';
 }
 function talentReason(reset=false){
   if(hunting.hp<=0)return '먼저 다시 일어나 주세요.';
-  if(raids.active||hunting.tactics.busy||hunting.sinceHit<6||warrior.active||warrior.planted||hunting.drawing)return '전투와 동작을 마친 뒤 특성을 골라 주세요.';
+  if(raids.active||hunting.tactics.busy||hunting.sinceHit<6||warrior.active||warrior.planted||hunting.drawing||mage.cast||mage.projectiles.length)return '전투와 동작을 마친 뒤 특성을 골라 주세요.';
   if(reset&&!village.isSafe(player))return '마을 안에서 무료로 다시 고를 수 있어요.';
   return null;
 }
@@ -112,10 +126,11 @@ function resetTalents(){const reason=talentReason(true);const result=reason?{acc
 function renderTalents(){
   const s=progression.state();$('talent-level').textContent=`레벨 ${s.level} / 10`;$('talent-xp').textContent=s.required?`${s.current} / ${s.required} XP`:'최고 레벨 달성';$('talent-points').textContent=`남은 포인트 ${s.points}`;
   const tree=$('talent-tree');tree.replaceChildren();
-  for(const branch of TALENT_BRANCHES){
+  $('talents-eyebrow').textContent=(hunting.classId==='mage'?'마법사의 성장':'전사의 성장')+' · 최대 10레벨';
+  for(const branch of progression.branches){
     const column=document.createElement('section');column.className='talent-branch';column.style.setProperty('--branch-color',branch.color);
     const heading=document.createElement('h3');heading.textContent=branch.name;const detail=document.createElement('p');detail.className='branch-detail';detail.textContent=branch.detail;column.append(heading,detail);
-    for(const t of TALENTS.filter(t=>t.branch===branch.id)){
+    for(const t of progression.talents.filter(t=>t.branch===branch.id)){
       const rank=progression.rank(t.id),reason=talentReason()??progression.reason(t.id),card=document.createElement('button');card.className='talent-node'+(rank?' learned':'')+(reason?' locked':' available');card.disabled=!!reason;card.title=reason??`${t.name} 배우기 · 1점`;card.setAttribute('aria-label',`${t.name} ${rank}/${t.max} · ${t.description}${reason?' · '+reason:' · 배우기'}`);
       const icon=document.createElement('span');icon.className='talent-icon';icon.textContent=t.icon;icon.setAttribute('aria-hidden','true');
       const content=document.createElement('span');content.className='talent-content';const name=document.createElement('strong');name.textContent=t.name;const desc=document.createElement('span');desc.textContent=t.description;const note=document.createElement('small');note.textContent=rank===t.max?'모두 배움':s.level<t.level?`${t.level}레벨에 열림`:t.parent&&!progression.rank(t.parent)?'위 특성 1점 필요':reason??'클릭해서 배우기';content.append(name,desc,note);
@@ -126,6 +141,19 @@ function renderTalents(){
   $('reset-talents').disabled=!!talentReason(true)||s.spent===0;$('reset-talents').title=talentReason(true)??'골드 소모 없이 포인트 반환';$('talent-message').textContent=talentReason()??'배운 특성은 바로 적용돼요.';
 }
 function openTalents(){if(menuOpen())return {accepted:false,reason:'열린 메뉴를 먼저 닫아 주세요.'};renderTalents();$('talents-dialog').showModal();setPaused(true);return {accepted:true};}
+function renderClasses(){
+  const safe=village.isSafe(player)&&hunting.hp>0&&!raids.active&&hunting.sinceHit>=6;
+  for(const b of document.querySelectorAll('[data-class-choice]')){b.setAttribute('aria-pressed',String(b.dataset.classChoice===hunting.classId));b.disabled=!safe||b.dataset.classChoice===hunting.classId;}
+  $('class-message').textContent=safe?'레벨·재산은 공유하고 특성은 직업별로 보관해요. 전직하면 전투 자원은 비워집니다.':'B로 솔바람 마을에 돌아와 무료로 전직하세요.';
+  $('class-travel').hidden=safe;
+}
+function openClasses(){if(menuOpen())return;renderClasses();$('class-dialog').showModal();setPaused(true);}
+function chooseClass(id){
+  const result=hunting.chooseClass(id,player);
+  if(result.accepted){clearInput();equipWeapon(hunting.weapon);playerFeedback.reset(hunting.hp,hunting.maxHp);updateHUD();notify(id==='mage'?'서리불꽃 마법사 · 2 서리창 → 1 화염구 → 4 불꽃 쇄도':'양손 도끼 전사로 돌아왔어요.');}
+  else notify(result.reason);
+  if($('class-dialog').open)renderClasses();return result;
+}
 function renderAudio(){for(const key of ['music','effects']){const value=Math.round(audio.settings[key]*100);$(key+'-volume').value=value;$(key+'-volume-value').textContent=value+'%';}$('audio-enabled').checked=audio.settings.enabled;$('audio-button').setAttribute('aria-label',audio.settings.enabled?'소리 설정 · 켜짐':'소리 설정 · 꺼짐');$('audio-button').textContent=audio.settings.enabled?'♫':'♪';$('audio-status').textContent=audio.available?'플레이 중 음악이 흐릅니다. 잠시 쉬거나 다른 탭으로 이동하면 소리도 쉬어요.':'이 브라우저에서는 소리를 시작하지 못했어요. 게임은 계속할 수 있습니다.';}
 function openAudio(){if(menuOpen())return;renderAudio();$('audio-dialog').showModal();setPaused(true);}
 function toggleBuild(value=!buildingMode){
@@ -145,10 +173,10 @@ function buildAction(remove=false){
   buildingView.update(true,buildMaterial,player);const result=remove?building.remove(buildingView.removeId,player):buildingView.candidate?building.place(buildingView.candidate,player):{accepted:false,reason:'건축 부지의 바닥이나 놓은 블록을 바라봐 주세요.'};
   if(result.accepted){audio.event({type:remove?'build-remove':'build-place'});buildingView.sync();}else notify(result.reason);updateHUD();return result;
 }
-function updateGrowthHUD(){const s=progression.state();$('player-level').textContent=`Lv. ${s.level} 전사`;$('xp-meter').max=s.required||1;$('xp-meter').value=s.required?s.current:1;$('xp-value').textContent=s.required?`${s.current} / ${s.required} XP`:'최고 레벨';$('talent-badge').hidden=s.points===0;$('talent-badge').textContent=s.points;
+function updateGrowthHUD(){const s=progression.state();$('player-level').textContent=`Lv. ${s.level} ${hunting.classId==='mage'?'마법사':'전사'}`;$('class-weapon').textContent=hunting.classId==='mage'?'서리 · 불꽃':'양손 무기';$('xp-meter').max=s.required||1;$('xp-meter').value=s.required?s.current:1;$('xp-value').textContent=s.required?`${s.current} / ${s.required} XP`:'최고 레벨';$('talent-badge').hidden=s.points===0;$('talent-badge').textContent=s.points;
   if(buildingMode){for(const k of Object.keys(BUILDING_BLOCKS))$('build-'+k).textContent=village.blocks[k];$('build-count').textContent=`${building.blocks.size} / 600 블록`;$('build-title').textContent=plotAt(player.x,player.z)?.name??'나의 건축 부지';$('build-hint').textContent=buildingView.candidate?buildingView.reason??'초록색 칸 · 좌클릭으로 설치할 수 있어요.':'화면 가운데 조준점을 건축 부지에 맞춰 주세요.';}
 }
-function clearInput() { cancelBowDraw(); warrior.queued = null; keys.clear(); touchX = touchZ = 0; dragging = null; $('stick').style.transform = ''; }
+function clearInput() { cancelBowDraw(); mage.cancel(); warrior.queued = null; keys.clear(); touchX = touchZ = 0; dragging = null; $('stick').style.transform = ''; }
 function capturePointer(element, pointerId) {
   // Embedded browsers can reject capture while pointer lock is changing.
   try { element.setPointerCapture(pointerId); } catch { /* Dragging still works inside the play area. */ }
@@ -166,7 +194,7 @@ async function lockMouse() {
     if (!renderer.domElement.requestPointerLock) throw new Error('unsupported');
     await renderer.domElement.requestPointerLock();
   } catch {
-    notify('우클릭 드래그로 시점 회전 · 1~4 연계 · 5 궁극기 · 좌클릭 기본 공격');
+    notify('우클릭 드래그로 시점 회전 · 1~5 기술 · 좌클릭 기본 공격');
   } finally { requestingMouse = false; }
 }
 function resumeFromMenu() {
@@ -196,7 +224,7 @@ function resetPosition() {
   if($('trade-dialog').open)$('trade-dialog').close();
   const reviving = hunting.hp <= 0;
   player.reset(); yaw = .16; pitch = .29; clearInput();
-  hunting.restorePlayer(); avatar.root.rotation.y = Math.PI;
+  hunting.restorePlayer();hunting.events.length=0;playerFeedback.reset(hunting.hp,hunting.maxHp);cameraShake=0;avatar.root.rotation.y = Math.PI;
   hunting.inSanctuary=false;
   impactPause = 0;
   $('defeat').hidden = true;
@@ -204,21 +232,31 @@ function resetPosition() {
   updateCamera(1, true); updateHUD(); notify('시작 위치에서 체력을 회복했어요.');
 }
 function equipWeapon(weapon) {
+  if((weapon==='staff')!==(hunting.classId==='mage')){notify('직업 메뉴 L에서 마을 전직을 이용하세요.');return false;}
   cancelBowDraw();
   if (warrior.active && weapon !== hunting.weapon) player.vx = player.vz = 0;
   hunting.equip(weapon);
   document.body.dataset.weapon = weapon;
+  document.body.dataset.class=hunting.classId;
+  $('warrior-hud').setAttribute('aria-label',hunting.classId==='mage'?'마법사 기술':'전사 기술');
+  for(const id of ['axe-button','sword-button','bow-button'])$(id).hidden=hunting.classId==='mage';
+  $('staff-button').hidden=hunting.classId!=='mage';
+  world.setAttribute('aria-label',hunting.classId==='mage'?'3D 들판. WASD 이동, 1 화염구, 2 서리창, 3 서리 고리, 4 불꽃 쇄도, 5 원소 해방, F 점멸, 6 얼음 방벽. 좌클릭 마력탄, V 시점 전환.':'3D 들판. WASD 이동, 1 돌진, 2 내려찍기, 3 날아차기, 4 가로베기, 5 회전베기, F 회피, 6 함성. 좌클릭 기본 공격, V 시점 전환.');
+  WARRIOR_SKILLS.forEach((s,i)=>{const shown=hunting.classId==='mage'?MAGE_SKILLS[i]:s,b=$('skill-'+s.id);b.querySelector('strong').textContent=shown.name;b.setAttribute('aria-label',`${shown.key} ${shown.name}`);b.title=hunting.classId==='mage'?`${shown.key} · ${shown.detail}`:warriorButtonTitles[i];});
   const bow = weapon === 'bow', axe = weapon === 'axe';
   for (const [id, selected] of [['axe-button', axe], ['sword-button', weapon === 'sword'], ['bow-button', bow]]) {
     $(id).classList.toggle('selected', selected); $(id).setAttribute('aria-pressed', String(selected));
   }
-  $('weapon-name').textContent = axe ? '양손 도끼' : bow ? '들판의 활' : '여행자의 칼';
+  $('weapon-name').textContent = weapon==='staff'?'서리불꽃 지팡이':axe ? '양손 도끼' : bow ? '들판의 활' : '여행자의 칼';
   $('weapon-hint').textContent = axe ? '2초마다 자동 공격 · 1~5 기술' : bow ? '좌클릭 꾹 당기기 · 놓으면 발사' : '2초마다 자동 공격 · 좌클릭 직접 베기';
-  $('warrior-hud').hidden = !axe;
+  $('warrior-hud').hidden = !axe&&weapon!=='staff';
   $('touch-attack').textContent = bow ? '당기기' : '공격';
   $('touch-attack').setAttribute('aria-label', bow ? '누르고 활 당기기, 놓으면 발사' : axe ? '도끼 기본 공격' : '칼로 공격');
+  if(weapon==='staff'){$('weapon-hint').textContent='2 서리 → 1 화염 → 이동하며 4 잔불';$('touch-attack').textContent='마력탄';$('touch-attack').setAttribute('aria-label','마력탄 발사');}
   if (bow && pitch > .10) pitch = .08;
+  if(weapon==='staff'){pitch=.04;cameraDistance=7.4;}
   updateCamera(1, true); world.focus({ preventScroll: true });
+  return true;
 }
 function attack() {
   if(buildingMode)return buildAction().accepted;
@@ -237,6 +275,13 @@ function useWarriorSkill(skill, showHint = true) {
   if (!result.accepted && showHint) notify(result.reason);
   if (result.accepted) updateWarriorHUD();
   return result;
+}
+function useMageSkill(skill,direction='movement'){
+  if(!started||paused||menuOpen()||buildingMode)return {accepted:false,reason:'메뉴와 건축을 닫고 플레이를 이어 가세요.'};
+  const aim=huntingView.aim(),dir=skill==='blink'?tacticDirection(direction):{x:-Math.sin(yaw),y:aim.direction.y,z:-Math.cos(yaw)};
+  const result=mage.request(skill,player,dir,aim.point);
+  if(!result.accepted)notify(result.reason);else avatar.root.rotation.y=Math.atan2(-Math.sin(yaw),-Math.cos(yaw));
+  updateHUD();return result;
 }
 function upgradeHandle() {
   const result = !started ? {accepted:false,reason:'플레이를 먼저 시작해 주세요.'} : forestry.upgrade();
@@ -293,6 +338,7 @@ function startBattle(mode='field'){
   if(buildingMode)toggleBuild(false);
   started=true;$('welcome').hidden=true;$('crosshair').hidden=false;$('battle-dialog').close();setPaused(false);
   yaw=Math.PI/2;pitch=raids.selected==='lysea'?.28:.52;cameraDistance=raids.selected==='lysea'?14.5:12;avatar.root.rotation.y=-Math.PI/2;impactPause=0;
+  if(hunting.classId==='mage'){pitch=.04;cameraDistance=7.4;}
   updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});void lockMouse();return result;
 }
 function questAction(action){
@@ -307,8 +353,9 @@ function travelToHunt(){
   Object.assign(player,{x:area.entry.x,z:area.entry.z,y:terrainHeight(area.entry.x,area.entry.z),vx:0,vz:0,vy:0,grounded:true,jumpBuffer:0});
   hunting.inSanctuary=false;hunting.autoMelee.targetId=null;started=true;$('welcome').hidden=true;$('crosshair').hidden=false;
   yaw=Math.PI/2;pitch=raids.selected==='lysea'?.28:.48;cameraDistance=raids.selected==='lysea'?14.5:12;avatar.root.rotation.y=-Math.PI/2;
+  if(hunting.classId==='mage'){pitch=.04;cameraDistance=7.4;}
   $('battle-dialog').close();setPaused(false);updateCamera(1,true);animateAvatar(0,0);updateHUD();world.focus({preventScroll:true});void lockMouse();
-  notify(raids.arena.name+' · J 의뢰에서 '+raids.arena.startLabel+' · F 회피');return {accepted:true};
+  notify(raids.arena.name+' · J 의뢰에서 '+raids.arena.startLabel+(hunting.classId==='mage'?' · F 점멸':' · F 회피'));return {accepted:true};
 }
 function rallyResidents(){
   const result=!started||paused?{accepted:false,reason:'플레이를 이어 가 주세요.'}:raids.toggleOrder();notify(result.message??result.reason);updateHUD();return result;
@@ -318,13 +365,14 @@ function updateRaidHUD(){
   const boss=raids.boss.state();$('boss-hud').hidden=!raids.active||!boss;document.body.classList.toggle('boss-active',raids.active&&!!boss);
   const nearby=raids.nearestArena(player);$('hunt-prompt').hidden=!started||raids.active||menuOpen()||hunting.hp<=0||Math.hypot(player.x-nearby.x,player.z-nearby.z)>nearby.radius;
   $('hunt-prompt').textContent='J '+nearby.bossName+' · 토벌 준비 →';document.body.classList.toggle('mirror-active',raids.active&&raids.selected==='lysea');
-  if(boss){$('boss-name').textContent=boss.name;$('boss-phase').textContent=`${boss.phase}단계`;$('boss-health').max=boss.maxHp;$('boss-health').value=boss.health;$('boss-health-text').textContent=`${boss.health} / ${boss.maxHp}`;
+  if(boss){$('boss-name').textContent=boss.name;$('boss-phase').textContent=`${boss.phase}단계`+(boss.armorReduction?` · 돌갑옷 −${Math.round(boss.armorReduction*100)}%`:boss.exposed>0?' · 약점 +40%':'');$('boss-health').max=boss.maxHp;$('boss-health').value=boss.health;$('boss-health-text').textContent=`${boss.health} / ${boss.maxHp}`;
     $('boss-cast-name').textContent=boss.cast?.name??(boss.exposed>0?(raids.selected==='lysea'?'진짜 발견 · 본체 노출':'공명석 파괴 · 약점 노출'):'숨 고르기 · 공격 기회');$('boss-cast-time').textContent=boss.cast?`${boss.cast.remaining.toFixed(1)}초`:boss.exposed>0?`${boss.exposed.toFixed(1)}초`:'';$('boss-cast').value=boss.cast?.progress??(boss.exposed/raids.arena.exposure);
-    $('boss-hud').classList.toggle('interruptible',boss.exposed>0);$('boss-hint').textContent=boss.cast?.hint??(boss.exposed>0?'6 함성 → 1~4 연계 → 5 회전베기 · 받는 피해 +40%':raids.selected==='lysea'?'기둥 위치를 확인하며 공격 · 다음 주문에 대비하세요':'옆과 뒤에서 공격 · 다음 바닥 예고에 대비하세요');}
+    const openingHint=hunting.classId==='mage'?'2 서리창 → 1 화염구 · 잔불과 원소 해방으로 몰아치세요':'6 함성 → 2→3→4 긴 연계 → 5 회전베기';
+    $('boss-hud').classList.toggle('interruptible',boss.exposed>0);$('boss-hint').textContent=boss.cast?.hint??(boss.exposed>0?openingHint:raids.selected==='lysea'?'기둥 위치를 확인하며 공격 · 다음 주문에 대비하세요':boss.hazards.some(h=>h.active&&h.burn)?'보라색 잔류 번개는 매초 피해 · 원 밖으로 나와 공격하세요':'돌갑옷으로 받는 피해 25% 감소 · 공명석에 번개를 유도하세요');}
   if(!raids.active)return;
   $('raid-mode').textContent=raids.arena.name+' · 야외 토벌';$('raid-wave').textContent=`${Math.floor(raids.elapsed/60)}:${String(Math.floor(raids.elapsed%60)).padStart(2,'0')}`;
   $('raid-objective').textContent=raids.selected==='lysea'?`진짜 발견 ${boss?.stats.mirrorBreaks??0}회 · 엄폐 ${boss?.stats.coverSuccess??0}회`:`공명석 ${boss?.stats.stoneBreaks??0}회 파괴 · 자동 회복 없음`;
-  const a=raids.allies[0];$('raid-allies').textContent=a?(a.alive?`나리 · 체력 ${Math.ceil(a.hp)} · 치유 ${a.healCharges}/3회 남음`:'나리 휴식 중 · 혼자서도 계속할 수 있어요'):'단독 토벌 · F 회피 / H 물약';
+  const a=raids.allies[0];$('raid-allies').textContent=a?(a.alive?`나리 · 체력 ${Math.ceil(a.hp)} · 치유 ${a.healCharges}/3회 남음`:'나리 휴식 중 · 혼자서도 계속할 수 있어요'):`단독 토벌 · F ${hunting.classId==='mage'?'점멸':'회피'} / H 물약`;
   $('rally-button').hidden=!a;$('rally-button').textContent=raids.order==='fight'?'G 나리 집결':'G 나리 동행';
 }
 function renderTrade(message='') {
@@ -385,7 +433,12 @@ const unlockAudio=()=>{if(!audio.context||audio.context.state==='suspended')void
 document.addEventListener('pointerdown',unlockAudio,{capture:true});document.addEventListener('keydown',unlockAudio,{capture:true});
 $('talents-button').addEventListener('click',openTalents);$('close-talents').addEventListener('click',()=>closeMenu('talents-dialog'));$('reset-talents').addEventListener('click',resetTalents);
 $('audio-button').addEventListener('click',openAudio);$('close-audio').addEventListener('click',()=>closeMenu('audio-dialog'));
-for(const id of ['talents-dialog','audio-dialog','battle-dialog','trade-dialog','help-dialog']) {
+$('class-button').addEventListener('click',openClasses);$('close-class').addEventListener('click',()=>closeMenu('class-dialog'));
+for(const b of document.querySelectorAll('[data-class-choice]'))b.addEventListener('click',()=>{if(chooseClass(b.dataset.classChoice).accepted)closeMenu('class-dialog');});
+$('class-travel').addEventListener('click',()=>{$('class-dialog').close();if(travelToVillage().accepted)openClasses();});
+$('mage-start').addEventListener('click',()=>{if(travelToVillage().accepted)chooseClass('mage');});
+$('staff-button').addEventListener('click',()=>equipWeapon('staff'));
+for(const id of ['talents-dialog','audio-dialog','battle-dialog','trade-dialog','help-dialog','class-dialog']) {
   // Escape releases the mouse intentionally; closing with the button resumes in that gesture.
   $(id).addEventListener('cancel',()=>setPaused(true));
   $(id).addEventListener('close',()=>{if(id==='trade-dialog')talkingTo=null;$('resume').hidden=!paused||!started||menuOpen()||hunting.hp<=0;updateHUD();world.focus({preventScroll:true});});
@@ -399,7 +452,7 @@ $('sword-button').addEventListener('click', () => equipWeapon('sword'));
 $('bow-button').addEventListener('click', () => equipWeapon('bow'));
 $('axe-button').addEventListener('click', () => equipWeapon('axe'));
 $('upgrade-handle').addEventListener('click', () => { upgradeHandle();world.focus({preventScroll:true}); });
-for (const skill of WARRIOR_SKILLS) $('skill-' + skill.id).addEventListener('click', () => { useWarriorSkill(skill.id); world.focus({ preventScroll: true }); });
+for (const [i,skill] of WARRIOR_SKILLS.entries()) $('skill-' + skill.id).addEventListener('click', () => { if(hunting.classId==='mage')useMageSkill(MAGE_SKILLS[i].id);else useWarriorSkill(skill.id); world.focus({ preventScroll: true }); });
 for(const id of ['evade','battlecry'])$('tactic-'+id).addEventListener('click',()=>{useTactic(id);world.focus({preventScroll:true});});
 $('revive-button').addEventListener('click', () => { resetPosition(); play(); });
 $('play-button').addEventListener('click', play);
@@ -434,7 +487,7 @@ document.addEventListener('pointerlockchange', () => {
   else if (wasLocked && !locked && !intentionalRelease) setPaused(true);
 });
 document.addEventListener('pointerlockerror', () => {
-  if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~4 연계 · 5 궁극기');
+  if (started && !paused) notify('우클릭 드래그 또는 Q · E로 시점 회전 · 1~5 기술');
 });
 document.addEventListener('keydown', event => {
   if (menuOpen()) return;
@@ -445,10 +498,11 @@ document.addEventListener('keydown', event => {
   if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.code)) event.preventDefault();
   if (event.repeat) return;
   if(event.code==='KeyP'){event.preventDefault();openTalents();return;}
+  if(event.code==='KeyL'){event.preventDefault();openClasses();return;}
   if(event.code==='KeyK'){event.preventDefault();toggleBuild();return;}
   if (event.code === 'KeyV') setView(firstPerson ? 'third' : 'first');
   if (event.code === 'KeyR') resetPosition();
-  if (event.code === 'KeyZ') equipWeapon('axe');
+  if (event.code === 'KeyZ') equipWeapon(hunting.classId==='mage'?'staff':'axe');
   if (event.code === 'KeyX') equipWeapon('sword');
   if (event.code === 'KeyC') equipWeapon('bow');
   if (event.code === 'KeyT') {event.preventDefault();upgradeHandle();return;}
@@ -461,8 +515,8 @@ document.addEventListener('keydown', event => {
   if(event.code==='KeyF'){event.preventDefault();if(buildingMode)buildAction();else useTactic('evade');return;}
   if(event.code==='Digit6'){event.preventDefault();useTactic('battlecry');return;}
   if(event.code==='KeyE'&&!buildingMode&&village.nearest(player)){event.preventDefault();openResident();return;}
-  const skill = WARRIOR_SKILLS.find(s => event.code === 'Digit' + s.key);
-  if (skill) { event.preventDefault(); useWarriorSkill(skill.id); return; }
+  const skill = (hunting.classId==='mage'?MAGE_SKILLS:WARRIOR_SKILLS).find(s => event.code === 'Digit' + s.key);
+  if (skill) { event.preventDefault(); if(hunting.classId==='mage')useMageSkill(skill.id);else useWarriorSkill(skill.id); return; }
   keys.add(event.code);
   if (event.code === 'Space') player.jump();
 });
@@ -572,6 +626,8 @@ function updateInput(dt) {
   input.x = sideways * Math.cos(yaw) - forward * Math.sin(yaw);
   input.z = -sideways * Math.sin(yaw) - forward * Math.cos(yaw);
   input.sprint = touchSprint || keys.has('ShiftLeft') || keys.has('ShiftRight');
+  mage.movement(input,player);
+  if(mage.cast){const aim=huntingView.aim();mage.setAim({x:-Math.sin(yaw),y:aim.direction.y,z:-Math.cos(yaw)},aim.point);}
   warrior.movement(input, player);
   hunting.tactics.movement(input);
 }
@@ -593,7 +649,7 @@ function updateCamera(dt, immediate = false) {
   focus.set(player.x, player.y + 1.22, player.z);
   const action = warrior.active, widen = !reduceMotion && action ? action.id==='spin' ? Math.min(1,action.elapsed/.2,(action.duration-action.elapsed)/.2)*1.3 : ['kick','sweep'].includes(action.id) ? Math.sin(action.elapsed/action.duration*Math.PI)*(action.id==='sweep'?1.25:.85) : 0 : 0;
   desired.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(cameraDistance + widen).add(focus);
-    const bow = hunting.weapon === 'bow'||buildingMode;
+    const bow = ['bow','staff'].includes(hunting.weapon)||buildingMode;
   if (bow) { focus.y += .22; desired.y += .22; desired.x += Math.cos(yaw) * .68; desired.z -= Math.sin(yaw) * .68; }
   safeCameraPosition(focus, desired);
   if (immediate) camera.position.copy(desired);
@@ -611,7 +667,7 @@ function animateAvatar(dt, time) {
     const facing = warrior.facing(); avatar.root.rotation.y = Math.atan2(facing.x, facing.z);
   } else if (hunting.swing > 0 && hunting.meleeFacing) {
     avatar.root.rotation.y = Math.atan2(hunting.meleeFacing.x,hunting.meleeFacing.z);
-  } else if (hunting.weapon === 'bow') {
+  } else if (hunting.weapon === 'bow'||hunting.weapon==='staff') {
     avatar.root.rotation.y = Math.atan2(-Math.sin(yaw), -Math.cos(yaw));
   } else if (speed > .15) {
     const angle = Math.atan2(player.vx, player.vz);
@@ -626,6 +682,7 @@ function animateAvatar(dt, time) {
   avatar.arms.forEach((arm, i) => { arm.rotation.x = player.grounded ? -Math.sin(phase + i * Math.PI) * stride * .7 : -.75; arm.rotation.z = (i === 0 ? 1 : -1) * (.05 + Math.sin(time * 1.6) * .025); });
 }
 function updateWarriorHUD() {
+  if(hunting.classId==='mage'){updateMageHUD();return;}
   const nearbyOpening=hunting.targets().find(e=>e.alive&&e.offBalance>0&&Math.hypot(e.x-player.x,e.z-player.z)<18);
   $('critical-opening').hidden = !started || !nearbyOpening;
   if(nearbyOpening)$('critical-opening').textContent=`✦ ${nearbyOpening.kind==='tree'?'금이 간 나무':'비틀거리는 적'} · 다음 적중은 치명타 ×${hunting.criticalMultiplier}`;
@@ -638,16 +695,17 @@ function updateWarriorHUD() {
     sweep: elapsed < .52 ? '끌어오기' : elapsed < .90 ? '몸 틀기' : elapsed < 1.26 ? '크게 베기' : '마무리',
     spin: `${a?.stage ?? 1}단계 · ${Math.max(0,(a?.duration ?? 0)-elapsed).toFixed(1)}초`,
   };
-  const ready = warrior.ultimate.ready, combo = warrior.combo, spinning = a?.id === 'spin';
+  const ready = warrior.ultimate.ready, combo = warrior.combo, spinning = a?.id === 'spin', charge=warrior.ultimate.charge;
+  const gain=warrior.ultimate.lastGain,recentGain=gain&&hunting.time-gain.time<1.8;
   $('ultimate-info').classList.toggle('ready', ready); $('ultimate-info').classList.toggle('empowered', spinning && a.stage===2);
-  $('ultimate-charge').max = spinning ? a.duration : 4;
-  $('ultimate-charge').value = spinning ? a.duration-elapsed : ready ? 4 : combo.step;
-  $('ultimate-charge').setAttribute('aria-label', spinning ? '회전베기 남은 시간' : '궁극기 연계 진행');
+  $('ultimate-charge').max = spinning ? a.duration : ULTIMATE_CHARGE.max;
+  $('ultimate-charge').value = spinning ? a.duration-elapsed : charge;
+  $('ultimate-charge').setAttribute('aria-label', spinning ? '회전베기 남은 시간' : '궁극기 충전');
   $('ultimate-status').textContent = spinning ? `${a.stage}단계 ${a.stage===2?'흡입 회전':'회전베기'} · ${(a.duration-elapsed).toFixed(1)}초${a.extended>0?` · +${a.extended.toFixed(2)}초`:''}`
-    : ready ? '궁극기 준비 완료 · 5 회전베기' : combo.step ? `연계 ${combo.step}/4 적중 · 다음 ${combo.step+1}${hunting.tactics.busy?' · 연계 시간 보존':combo.remaining>0?` · ${combo.remaining.toFixed(1)}초`:''}`
-    : combo.failure ? `${combo.failure} · 1번부터 다시` : '궁극기 연계 · 1 → 2 → 3 → 4 적중';
+    : ready ? '궁극기 100/100 · 5 회전베기 준비' : `궁극기 ${charge}/100${recentGain?` · ${gain.route==='long'?'긴 마무리':gain.route==='short'?'짧은 마무리':'적중'} +${gain.amount}`:combo.failure&&charge>0?' · 연계가 끊겨도 충전 유지':charge>0?' · 모은 충전은 유지돼요':' · 짧게 두 번 / 길게 한 번'}`;
   for (const skill of WARRIOR_SKILLS) {
     const button = $('skill-' + skill.id), remaining = warrior.cooldowns[skill.id];
+    button.disabled=false;
     const needsAxe = ['kick','sweep'].includes(skill.id) && !warrior.followup;
     const usedKick = skill.id === 'kick' && warrior.followup?.kicked;
     const recoverFirst = ['charge','slam'].includes(skill.id) && warrior.planted;
@@ -656,16 +714,29 @@ function updateWarriorHUD() {
     button.classList.toggle('unavailable', remaining > 0 || needsAxe || usedKick || recoverFirst || (skill.id==='spin'&&!ready&&!active));
     button.classList.toggle('ready', skill.id==='spin' && ready);button.classList.toggle('empowered', active && spinning && a.stage===2);
     button.style.setProperty('--cooldown', `${skill.cooldown ? remaining / skill.cooldown * 100 : 0}%`);
-    $('skill-state-' + skill.id).textContent = active ? phaseLabels[skill.id] : queued ? '다음 동작' : skill.id==='spin' ? ready ? '사용 가능' : `${combo.step}/4 적중` : remaining > 0 ? `${remaining.toFixed(1)}초` : usedKick ? '4번으로 마무리' : recoverFirst ? '도끼 회수 후' : needsAxe ? '내려찍기 후' : '준비';
+    $('skill-state-' + skill.id).textContent = active ? phaseLabels[skill.id] : queued ? '다음 동작' : skill.id==='spin' ? ready ? '사용 가능' : `${charge}/100` : remaining > 0 ? `${remaining.toFixed(1)}초` : usedKick ? '4번으로 마무리' : recoverFirst ? '도끼 회수 후' : needsAxe ? '내려찍기 후' : '준비';
   }
   const name = WARRIOR_SKILLS.find(s => s.id === a?.id)?.name;
   $('combo-title').textContent = a?.id === 'kick' && a.kickPower ? `날아차기 · ${a.kickPower.name} · ${a.kickPower.damage} 피해 / ${a.kickPower.distance}m 밀침` : name ?? (a?.id === 'slash' ? '기본 베기' : warrior.planted ? warrior.planted.kicked ? '뒤에 남은 도끼로 마무리' : '도끼가 박혔어요' : '양손 도끼 전사');
   $('combo-hint').textContent = warrior.queued ? `${WARRIOR_SKILLS.find(s=>s.id===warrior.queued.id).name} 예약됨${['kick','sweep'].includes(warrior.queued.id)?' · 발동 전 시점으로 방향 선택':''}`
     : a ? { charge: '2 내려찍기를 미리 눌러 이어 가세요', slam: '3 날아차기 또는 4 가로베기로 연계', kick: '앞으로 날아차기 → 4 가로베기로 마무리', sweep: elapsed < .52 ? '현재 위치에서 도끼를 끌어오기' : elapsed < .90 ? '낮게 버티고 크게 몸 틀기' : '온몸으로 휘두르는 넓은 가로베기', slash: a.automatic ? '근접 자동 공격 · 기술 입력이 우선해요' : '기본 공격 중', spin: a.stage===2 ? `끌어당기는 중 · 연속 ${a.streak}/3 · 다음 치명타까지 ${3-a.streak}회` : `연속 ${a.streak}/3 적중 → 흡입 강화 · WASD 이동` }[a.id]
-    : warrior.planted ? `${warrior.planted.kicked ? '4 가로베기' : '3 날아차기 → 4 가로베기'} · 시점으로 방향 선택 · ${warrior.planted.remaining.toFixed(1)}초`
-    : warrior.carried ? `${warrior.carried.kicked ? '4 가로베기' : '3 도끼를 들고 날아차기'} · 연계 계속 · ${warrior.carried.remaining.toFixed(1)}초`
-    : '1 → 2 → 3 → 4 · F 회피 중에도 다음 기술 예약';
+    : warrior.planted ? `${warrior.planted.kicked ? '4로 긴 연계 마무리' : '4 짧게 마무리 / 3→4 길게 공격'} · ${warrior.planted.remaining.toFixed(1)}초`
+    : warrior.carried ? `${warrior.carried.kicked ? '4 가로베기' : '4 짧게 / 3→4 길게'} · 회피 후 연계 · ${warrior.carried.remaining.toFixed(1)}초`
+    : '2→4 +50 · 2→3→4 +100 · 1은 접근';
   $('combo-progress').style.width = `${a ? a.elapsed / a.duration * 100 : warrior.planted ? warrior.planted.remaining / (3.4+progression.bonuses.combo) * 100 : 0}%`;
+}
+function updateMageHUD(){
+  const ready=mage.charge===100;
+  $('critical-opening').hidden=true;$('ultimate-info').classList.toggle('ready',ready);$('ultimate-info').classList.toggle('empowered',mage.surge>0);
+  $('ultimate-status').textContent=`잔불 ${'●'.repeat(mage.embers)}${'○'.repeat(2-mage.embers)} · ${mage.surge>0?`원소 해방 ${mage.surge.toFixed(1)}초`:ready?'5 원소 해방 준비':`원소 ${mage.charge}/100`}${mage.shield>0?` · 방벽 ${mage.shield}`:''}`;
+  $('ultimate-charge').max=mage.surge>0?8+progression.bonuses.mageSurge:100;$('ultimate-charge').value=mage.surge>0?mage.surge:mage.charge;$('ultimate-charge').setAttribute('aria-label',mage.surge>0?'원소 해방 남은 시간':'원소 해방 충전');
+  const tips=['2 서리창으로 적에게 표식을 남기세요','1 화염구로 서리 표식을 터뜨리세요','잔불 준비! 이동하면서 4 불꽃 쇄도','2 서리 → 1 화염 · 위험할 때 F 점멸 / 4 잔불'];
+  $('combo-title').textContent='서리불꽃 마법사';$('combo-hint').textContent=mage.cast?`화염구 영창 ${(mage.cast.duration-mage.cast.elapsed).toFixed(1)}초 · 이동하면 취소`:tips[mage.tutorial];
+  $('combo-progress').style.width=`${mage.cast?mage.cast.elapsed/mage.cast.duration*100:0}%`;
+  MAGE_SKILLS.forEach((s,i)=>{const old=WARRIOR_SKILLS[i].id,b=$('skill-'+old),cd=mage.cooldowns[s.id],reason=mage.reason(s.id,player),active=s.id==='fireball'&&!!mage.cast||s.id==='surge'&&mage.surge>0;
+    b.disabled=!started||paused||buildingMode||!!reason;b.classList.toggle('active',active);b.classList.remove('queued');b.classList.toggle('unavailable',!!reason);b.classList.toggle('ready',s.id==='surge'&&ready||s.id==='flare'&&mage.embers>0);b.classList.toggle('empowered',s.id==='surge'&&mage.surge>0);b.style.setProperty('--cooldown',`${s.cooldown?cd/s.cooldown*100:0}%`);
+    $('skill-state-'+old).textContent=active?(s.id==='fireball'?'영창 중':`${mage.surge.toFixed(1)}초`):cd>0?`${cd.toFixed(1)}초`:s.id==='flare'?`잔불 ${mage.embers}/2`:s.id==='surge'?ready?'사용 가능':`${mage.charge}/100`:s.id==='fireball'&&Math.hypot(player.vx,player.vz)>.25&&mage.surge<=0?'멈춰서 영창':'준비';
+  });
 }
 function updateHUD() {
   updateTacticsHUD();
@@ -684,13 +755,10 @@ function updateHUD() {
   $('coordinates').textContent = `${player.x.toFixed(0)} / ${(-player.z).toFixed(0)}`;
   const speed = Math.hypot(player.vx, player.vz);
   $('motion-state').textContent = paused && started ? '잠시 쉬는 중' : !player.grounded ? (player.vy > 0 ? '뛰어오르는 중' : '내려오는 중') : speed > 6 ? '달리는 중' : speed > .2 ? '걷는 중' : '가만히 서 있는 중';
-  const hp = Math.ceil(hunting.hp);
-  $('health-value').textContent = `${hp} / ${hunting.maxHp}`;
-  $('health-fill').style.width = `${hp/hunting.maxHp*100}%`; $('health-meter').setAttribute('aria-valuenow', String(hp));$('health-meter').setAttribute('aria-valuemax',String(hunting.maxHp));
-  $('health-fill').style.background = hp < 30 ? '#ed9984' : '#b3dc94';
+  updateHealthHUD();
   $('rabbit-count').textContent = hunting.kills.rabbit; $('slime-count').textContent = hunting.kills.slime;
-  const automatic=!!(hunting.autoAttackRecovery || hunting.autoMelee.targetId),melee=hunting.weapon!=='bow';
-  $('auto-attack-status').textContent=!melee?'활 · 직접 조준해 발사':paused?'근접 자동 공격 · 대기':warrior.planted||(warrior.active&&warrior.active.id!=='slash')||warrior.combo.remaining>0?'자동 공격 · 기술 연계 대기':automatic?'근접 자동 공격 중':'근접 자동 공격 · 적 접근 시';
+  const automatic=!!(hunting.autoAttackRecovery || hunting.autoMelee.targetId),melee=['axe','sword'].includes(hunting.weapon);
+  $('auto-attack-status').textContent=hunting.weapon==='staff'?'좌클릭 마력탄 · 이동 중 발사':!melee?'활 · 직접 조준해 발사':paused?'근접 자동 공격 · 대기':warrior.planted||(warrior.active&&warrior.active.id!=='slash')||(warrior.combo.step<4&&warrior.combo.remaining>0)?'자동 공격 · 기술 연계 대기':automatic?'근접 자동 공격 중':'근접 자동 공격 · 적 접근 시';
   $('auto-attack-status').classList.toggle('attacking',melee&&automatic&&!paused);
   if(safe)$('auto-attack-status').textContent='안전 지역 · 무기를 쉬게 해요';
   $('wood-count').textContent=forestry.wood;
@@ -705,6 +773,7 @@ function updateHUD() {
   $('crosshair').classList.toggle('on-target', !!target);
   if (target) { $('target-name').textContent = target.name??(target.kind==='tree'?(target.scale>=1.2?'굵은 소나무':'소나무'):target.kind === 'rabbit' ? '들토끼' : ['초록 슬라임', '파랑 슬라임', '보라 슬라임'][target.variant]); $('target-health').textContent = `${target.hp} / ${target.maxHp}`; $('target-opening').hidden = target.offBalance <= 0; $('target-opening').textContent=`${target.kind==='tree'?'균열':'비틀거림'} · 다음 적중 ${hunting.criticalMultiplier}배`; }
   updateWarriorHUD();
+  if(target&&target.frostMark>0){$('target-opening').hidden=false;$('target-opening').textContent=`서리 ${target.frostMark.toFixed(1)}초 · 1 화염구로 파열`;}
   $('warrior-hud').hidden=buildingMode||safe;
   $('soldier-hint').hidden=!target?.raider||target.fieldBoss;
   if(target?.raider&&!target.fieldBoss){const role=SOLDIER_ROLES[soldierRole(target)];$('soldier-hint').textContent=target.battlecry>0?'전투 함성 중 · 강화가 끝날 때까지 거리 벌리기':target.guardBroken>0?'방패 무너짐 · 공격 기회!':`${role.name} · ${target.action?BATTLE[target.action.id].name+' 준비 · ':''}${role.hint}`;}
@@ -713,11 +782,22 @@ function updateHUD() {
 function handleCombatEvents() {
   for (const event of hunting.events.splice(0)) {
     audio.event(event);
+    if(event.type.startsWith('mage-')){
+      mageView.effect(event);
+      if(event.type==='mage-ready')notify('원소 해방 준비! 5번으로 8초간 화염구를 즉시 시전하세요.');
+      if(event.type==='mage-shatter'||event.type==='mage-absorb'){
+        const el=document.createElement('span');el.className='damage-number mage-feedback';el.textContent=event.type==='mage-shatter'?'서리 파열 · 잔불 +1':`방벽 흡수 ${event.amount}`;$('combat-fx').appendChild(el);floatingHits.push({el,position:new THREE.Vector3(event.x??player.x,event.y??player.y+2.2,event.z??player.z),life:.9});
+      }
+    }
     if(event.type==='soldier-impact'&&event.skill!=='shot')warriorView.effect(event);
     if(event.type==='guard-break'||event.type==='guard-block'){const el=document.createElement('span');el.className='damage-number guard-feedback';el.textContent=event.type==='guard-break'?'방패 무너짐':'정면 방어';$('combat-fx').appendChild(el);floatingHits.push({el,position:new THREE.Vector3(event.x,event.y,event.z),life:.65});}
     if(event.type==='xp-earned'){const el=document.createElement('span');el.className='damage-number xp-reward';el.textContent=`+${event.amount} XP`;$('combat-fx').appendChild(el);floatingHits.push({el,position:new THREE.Vector3(player.x+.6,player.y+2.6,player.z),life:1.1});}
     if(event.type==='level-up'){notify(`레벨 ${event.level}! 체력 회복 · P에서 특성 ${event.points}점 선택`);if($('talents-dialog').open)renderTalents();}
     if(event.type==='raid-notice'||(event.type==='boss-warning'&&['arrival','exposed','miss'].includes(event.pattern)))notify(event.message);
+    else if(event.type==='hurt'){
+      playerFeedback.hit(event);
+      if(!reduceMotion)cameraShake=Math.max(cameraShake,.07);
+    }
     else if(event.type==='boss-impact'){huntingView.particleBurst({...event,kind:'impact'});if(!reduceMotion)cameraShake=Math.max(cameraShake,.035);}
     else if(event.type==='raid-result'){notify(event.message);if(hunting.hp>0)openBattle();}
     else if(event.type==='ally-heal'||event.type==='ally-hit'){
@@ -734,7 +814,7 @@ function handleCombatEvents() {
       warriorView.effect(event); huntingView.particleBurst({ ...event, y: event.y + .2, kind: 'impact' });
       impactPause = Math.max(impactPause,event.skill==='slam'?.075:event.skill==='kick'?(event.kickPower==='strong'?.10:.055):event.skill==='sweep'?.095:0);
       if (!reduceMotion) cameraShake = event.skill === 'slam' ? .13 : event.skill==='kick' ? event.kickPower==='strong'?.15:.09 : event.skill==='sweep'?.18:.032;
-    } else if (event.type === 'ultimate-ready') notify('4연계 성공! 5번 회전베기를 사용할 수 있어요.');
+    } else if (event.type === 'ultimate-ready') notify('궁극기 충전 완료! 원하는 순간 5번 회전베기를 쓰세요.');
     else if (event.type === 'spin-stage') { notify('회전베기 2단계 · 주변 적을 끌어당겨요!'); if(!reduceMotion) cameraShake=.07; }
     else if (event.type === 'spin-pulse' && event.extension>0) {
       const el=document.createElement('span');el.className='damage-number spin-extension';el.textContent=`+${event.extension.toFixed(2)}초`;$('combat-fx').appendChild(el);
@@ -760,10 +840,29 @@ function handleCombatEvents() {
     else if (event.type === 'player-defeat') { setPaused(true); $('defeat').hidden = false; $('resume').hidden = true; }
   }
 }
+function updateHealthHUD() {
+  const hp=Math.ceil(hunting.hp),max=hunting.maxHp;
+  playerFeedback.update(0,hunting.hp,max);const low=playerFeedback.lowHealth;
+  $('health-value').textContent=`${hp} / ${max}`;
+  $('health-fill').style.width=`${hunting.hp/max*100}%`;
+  $('health-loss').style.width=`${Math.min(max,Math.max(hunting.hp,playerFeedback.trailHealth))/max*100}%`;
+  $('health-meter').setAttribute('aria-valuenow',String(hp));$('health-meter').setAttribute('aria-valuemax',String(max));
+  $('health-fill').style.background=low?'#f28b7d':'#b3dc94';
+  $('health-state').textContent=low?'위험':'체력';
+  const vitals=$('health-meter').closest('.vitals');
+  vitals.classList.toggle('low-health',low);vitals.classList.toggle('taking-hit',playerFeedback.flash>0&&!paused);
+  const notice=playerFeedback.notice;
+  const receipt=notice?`−${notice.damage} · ${notice.source}`:low?(village.potions>0?(village.potionCooldown>0?'체력 위험 · 물약 재사용 대기':'체력 위험 · H 물약'):'체력 위험 · 공격을 피하세요'):'';
+  if($('health-receipt').textContent!==receipt){$('health-receipt').textContent=receipt;$('health-receipt').title=receipt;}
+}
 function combatFeedback(dt) {
   if (!paused) hitFeedback = Math.max(0, hitFeedback - dt);
   $('crosshair').classList.toggle('hit', hitFeedback > 0);
-  $('damage-flash').style.opacity = String(hunting.hurt * 2);
+  playerFeedback.update(paused?0:dt,hunting.hp,hunting.maxHp);updateHealthHUD();
+  const notice=playerFeedback.notice;
+  $('incoming-hit').hidden=!notice||notice.remaining<=0||paused||!started;
+  if(notice){$('incoming-amount').textContent=`−${notice.damage}`;$('incoming-source').textContent=notice.source;$('incoming-hit').style.opacity=String(Math.min(1,notice.remaining/.3));}
+  $('damage-flash').style.opacity=String(paused?0:reduceMotion?playerFeedback.flash/.52*.22:Math.min(1,playerFeedback.flash/.2)*.8);
   $('cooldown-fill').style.width = `${Math.max(0, 1 - (hunting.weapon === 'bow' ? hunting.cooldown / .45 : hunting.meleeCooldown / hunting.meleeInterval)) * 100}%`;
   const charge = Math.round(hunting.charge * 100);
   $('bow-charge').hidden = !hunting.drawing || paused;
@@ -793,7 +892,7 @@ function frame(milliseconds) {
     }
   }
   animateAvatar(dt, time); forestryView.update(player);villageView.update(player);updateCamera(dt);raidView.update(dt);mirrorView.update(dt);buildingView.update(buildingMode&&!paused,buildMaterial,player);
-  handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); warriorView.update(dt, firstPerson, player, paused); combatFeedback(dt);
+  handleCombatEvents(); huntingView.update(dt, firstPerson, avatar, paused); warriorView.update(dt, firstPerson, player, paused); mageView.update(dt,firstPerson,player,paused);combatFeedback(dt);
   battleAura.visible=hunting.tactics.battlecry>0&&hunting.hp>0;battleAura.position.set(player.x,player.y+.045,player.z);battleAura.scale.setScalar(1.4+Math.sin(hunting.time*8)*.08);
   if(hunting.tactics.dodge){const d=hunting.tactics.dodge;avatar.root.rotation.y=Math.atan2(d.dx,d.dz);if(!firstPerson){avatar.body.rotation.x=d.elapsed/BATTLE.evade.duration*Math.PI*2;avatar.body.position.y=.2;}}
   if (!paused) { cameraShake *= Math.exp(-18 * dt); camera.position.x += Math.sin(time * 61) * cameraShake; camera.position.y += Math.cos(time * 47) * cameraShake * .65; }
@@ -810,7 +909,7 @@ window.addEventListener('resize', () => {
 renderer.domElement.addEventListener('webglcontextlost', event => {
   event.preventDefault(); setPaused(true); loading.textContent = '그래픽 연결이 끊겼어요. 새로고침하면 다시 시작할 수 있어요.'; loading.hidden = false;
 });
-renderAudio();equipWeapon('axe'); forestryView.update(player);villageView.update(player);updateHUD();updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true); renderer.render(scene, camera);
+renderAudio();equipWeapon(hunting.classId==='mage'?'staff':'axe'); forestryView.update(player);villageView.update(player);updateHUD();updateCamera(1, true); animateAvatar(0, 0); huntingView.update(0, firstPerson, avatar, true); warriorView.update(0, firstPerson, player, true);mageView.update(0,firstPerson,player,true); renderer.render(scene, camera);
 loading.hidden = true; $('welcome').hidden = false;
 requestAnimationFrame(frame);
 
@@ -825,18 +924,20 @@ if (modelContext?.registerTool) {
     paused, started, health: Math.ceil(hunting.hp), maxHealth:hunting.maxHp, weapon: hunting.weapon, kills: { ...hunting.kills },
     progression:progression.state(),audio:audio.state(),building:{enabled:buildingMode,material:buildMaterial,...building.state(),candidate:buildingView.candidate,placementReason:buildingView.reason??null},
     bow: { drawing: hunting.drawing, charge: +hunting.charge.toFixed(3), arrowsInFlight: hunting.arrows.length, shotsFired: hunting.nextArrow - 1, lastShotCharge: hunting.lastCharge },
-    warrior: warrior.state(),tactics:hunting.tactics.state(),
+    classId:hunting.classId,mage:mage.state(),warrior: warrior.state(),tactics:hunting.tactics.state(),
     forestry: forestry.state(player),
     village:{...village.state(player),talkingTo},
     raids:raids.state(),
     combat: { criticalHits: hunting.criticalHits, lastHit: hunting.lastHit ? { ...hunting.lastHit } : null,
-      autoMelee: { enabled:hunting.weapon!=='bow',...hunting.autoMelee,intervalSeconds:hunting.meleeInterval,cooldown:+hunting.meleeCooldown.toFixed(3),attacking:!!(hunting.autoAttackRecovery&&(warrior.active?.id==='slash'||hunting.swing>0)) } },
+      autoMelee: { enabled:['axe','sword'].includes(hunting.weapon),...hunting.autoMelee,intervalSeconds:hunting.meleeInterval,cooldown:+hunting.meleeCooldown.toFixed(3),attacking:!!(hunting.autoAttackRecovery&&(warrior.active?.id==='slash'||hunting.swing>0)) } },
     creatures: hunting.entities.map(e => ({id:e.id,kind:e.kind,health:e.hp,alive:e.alive,offBalanceSeconds:+e.offBalance.toFixed(2),knockback:e.knockback?{power:e.knockback.id,progress:+(e.knockback.elapsed/e.knockback.duration).toFixed(2)}:null,lastPush:e.lastPush?{...e.lastPush,travelled:+e.lastPush.travelled.toFixed(2)}:null,position:{x:+e.x.toFixed(2),y:+(e.y+e.hop).toFixed(2),z:+e.z.toFixed(2)}})),
   });
   const validateEmpty = value => {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length) throw new Error('Expected an empty object.');
   };
   const tools = [
+    {name:'select_character_class',title:'전사 또는 마법사 전직',description:'Choose warrior or frostfire mage while safely in the village, matching the L class menu. Shares level and wealth, saves separate talents, clears combat resources without healing.',inputSchema:{type:'object',properties:{classId:{type:'string',enum:['warrior','mage']}},required:['classId'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||Object.keys(input).some(k=>k!=='classId'))throw new Error('Choose classId.');const r=chooseClass(input.classId);if(!r.accepted)throw new Error(r.reason);return state();}},
+    {name:'use_mage_skill',title:'마법사 주문 사용',description:'Use the same mage controls: fireball (1, stationary 0.8s cast; movement cancels for free), frost (2, frost mark), ring (3, nearby frost and ordinary-enemy root), flare (4, spend one stored ember), surge (5, spend 100 charge for instant fireballs), blink (F, collision checked), barrier (6, absorb damage). Frost then fireball grants one ember, up to two, preserved while moving. Aim follows the camera; range 12m; walls block spells. Requires active unpaused mage play.',inputSchema:{type:'object',properties:{skill:{type:'string',enum:[...MAGE_SKILLS.map(s=>s.id),'blink','barrier']},direction:{type:'string',enum:['movement','forward','back','left','right']}},required:['skill'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||![...MAGE_SKILLS.map(s=>s.id),'blink','barrier'].includes(input.skill)||Object.keys(input).some(k=>!['skill','direction'].includes(k))||(input.direction&&!['movement','forward','back','left','right'].includes(input.direction)))throw new Error('Choose mage skill and optional direction.');const r=useMageSkill(input.skill,input.direction);if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'use_tactical_skill',title:'회피 또는 전투 함성',description:'Use the visible F dodge or 6 battle cry. Dodge follows held movement or the camera direction, cancels the current animation but preserves landed combo steps and a prepared ultimate, pauses the combo timer with at least two seconds after landing, allows one queued skill, and has a four-second cooldown. Battle cry lasts six seconds with +35% outgoing and -25% incoming damage; cooldown thirty seconds. Paused play and build mode reject both. Direction matches WASD relative to the camera.',inputSchema:{type:'object',properties:{skill:{type:'string',enum:['evade','battlecry']},direction:{type:'string',enum:['movement','forward','back','left','right']}},required:['skill'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!input||!['evade','battlecry'].includes(input.skill)||Object.keys(input).some(k=>!['skill','direction'].includes(k))||(input.direction&&!['movement','forward','back','left','right'].includes(input.direction)))throw new Error('Choose evade or battlecry and a movement direction.');const r=useTactic(input.skill,input.direction);if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'open_talents',title:'전사 특성 열기',description:'Open the same P talent tree visible in the game. Pauses play.',inputSchema:{type:'object',properties:{},additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){validateEmpty(input);const r=openTalents();if(!r.accepted)throw new Error(r.reason);return state();}},
     {name:'learn_talent',title:'특성 배우기',description:'Spend one earned point in the open talent tree. Uses the same level, prerequisite and combat restrictions as the visible buttons.',inputSchema:{type:'object',properties:{talent:{type:'string',enum:TALENTS.map(t=>t.id)}},required:['talent'],additionalProperties:false},annotations:{readOnlyHint:false,untrustedContentHint:false},execute(input){if(!$('talents-dialog').open||!input||Object.keys(input).some(k=>k!=='talent'))throw new Error('Open the talent tree first.');const r=learnTalent(input.talent);if(!r.accepted)throw new Error(r.reason);return state();}},
@@ -873,18 +974,18 @@ if (modelContext?.registerTool) {
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); resetPosition(); return state(); } },
-    { name: 'equip_weapon', title: '도끼·칼·활 장착', description: 'Equip the two-handed axe, sword or bow, matching Z, X, C and the visible weapon buttons. Switching cancels a planted axe and any active skill.',
-      inputSchema: { type: 'object', properties: { weapon: { type: 'string', enum: ['axe', 'sword', 'bow'] } }, required: ['weapon'], additionalProperties: false },
+    { name: 'equip_weapon', title: '직업 무기 장착', description: 'Equip axe, sword or bow as warrior, or staff as mage, matching the visible weapon buttons. Change class only in the village with the L menu. Switching warrior weapons cancels a planted axe and any active skill.',
+      inputSchema: { type: 'object', properties: { weapon: { type: 'string', enum: ['axe', 'sword', 'bow','staff'] } }, required: ['weapon'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {
-        if (!input || !['axe', 'sword', 'bow'].includes(input.weapon) || Object.keys(input).some(k => k !== 'weapon')) throw new Error('weapon must be axe, sword or bow.');
-        equipWeapon(input.weapon); return state();
+        if (!input || !['axe', 'sword', 'bow','staff'].includes(input.weapon) || Object.keys(input).some(k => k !== 'weapon')) throw new Error('Choose axe, sword, bow or staff.');
+        if(!equipWeapon(input.weapon))throw new Error('Choose the matching class in the village first.'); return state();
       } },
-    { name: 'attack_with_weapon', title: '기본 근접 공격', description: 'Swing the equipped axe or sword, matching left click. F is dodge. For a bow use begin_bow_draw then release_bow_draw. Requires active play and a ready weapon.',
+    { name: 'attack_with_weapon', title: '기본 공격 또는 마력탄', description: 'Match left click: swing an axe or sword, or fire a staff magic bolt while moving. For a bow use begin_bow_draw then release_bow_draw. Requires active play and a ready weapon.',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) { validateEmpty(input); if (!attack()) throw new Error('Equip a ready axe or sword and resume play. Recover a planted axe with skill 4. For the bow, begin and release a draw.'); return { attacked: true, weapon: hunting.weapon }; } },
-    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill: 1 charge, 2 slam, 3 kick, 4 sweep, 5 spin ultimate. Kick and sweep need the planted axe or a follow-up carried through dodge/brief stagger and lock their travel and hit direction to the current camera heading when each skill actually starts, including queued follow-ups. Turning during the previous skill redirects only the next kick or sweep; charge and slam keep their existing direction rules. The planted axe stays at its original world anchor. Kick leaps forward, rolling light/medium/strong PRD power: 18/26/36 damage, 3/4.5/6m knockback. Targets become off balance for one double-damage hit within 4 seconds. Sweep recalls the axe without retreating and lunges forward. Landing charge, slam, kick, sweep in order stores one spin. Misses, wrong order, weapon switching, axe retrieval, or waiting over 3 seconds after a skill ends break an unfinished combo. Rejected inputs and ordinary damage do not; dodge or brief stagger preserves landed steps, freezes the timer during the interruption, and allows one buffered skill. Dodge grants at least two seconds afterward. The axe is retrieved and a held-axe kick can continue the chain. Cancelling before impact permits a retry; misses never earn credit. Heavy stagger of at least .65 seconds cancels an unfinished combo, while a prepared ultimate stays stored. The four player animations total 3.2 seconds; enemy warning times are unchanged. Spin lasts 2.5s, hits all directions every .25s, and allows movement. Every third consecutive connected pulse is 2x critical; the first such pulse upgrades to stage 2, pulling nearby visible enemies inward. A missed pulse resets the streak. Critical pulses add .25s once each, kills add .5s each, total duration caps at 4s. No damage or pull through walls. Trees also accept the same attacks, combo and spin hits. Kick cracks trees for the next critical without moving them; stage 2 pulls dropped wood. Felling a tree gives the same spin duration bonus as a defeat. One valid follow-up may be queued. Returns actual state; actions advance in real time.',
+    { name: 'use_warrior_skill', title: '전사 기술 사용', description: 'Use an equipped-axe skill: 1 charge, 2 slam, 3 kick, 4 sweep, 5 spin ultimate. Kick and sweep need the planted axe or a follow-up carried through dodge/brief stagger and lock their travel and hit direction to the current camera heading when each skill actually starts, including queued follow-ups. Turning during the previous skill redirects only the next kick or sweep; charge and slam keep their existing direction rules. The planted axe stays at its original world anchor. Kick leaps forward, rolling light/medium/strong PRD power: 18/26/36 damage, 3/4.5/6m knockback. Targets become off balance for one double-damage hit within 4 seconds. Sweep recalls the axe without retreating and lunges forward. Successful hits charge a 0–100 ultimate meter once per cast, never per target: charge +10, slam/kick/sweep +20 each. A connected slam → sweep adds a +10 finish bonus (50 total); slam → kick → sweep adds +40 (100 total). Charge is optional for approaching distant targets. At 100, one spin is stored until used. Misses, wrong order, weapon switching, axe retrieval, or waiting over 3 seconds after a skill ends break an unfinished combo. Rejected inputs and ordinary damage do not; dodge or brief stagger preserves landed steps, freezes the timer during the interruption, and allows one buffered skill. Dodge grants at least two seconds afterward. The axe is retrieved and either a held-axe sweep or kick can continue after slam. Cancelling before impact permits a retry; misses never earn credit. Heavy stagger of at least .65 seconds cancels an unfinished combo, while all earned charge stays stored. Misses, timeouts, movement, weapon changes and ordinary cancellations never remove earned charge. Spin consumption, death, R and page reload reset it; spin itself does not charge the meter. The four player animations total 3.2 seconds; enemy warning times are unchanged. Spin lasts 2.5s, hits all directions every .25s, and allows movement. Every third consecutive connected pulse is 2x critical; the first such pulse upgrades to stage 2, pulling nearby visible enemies inward. A missed pulse resets the streak. Critical pulses add .25s once each, kills add .5s each, total duration caps at 4s. No damage or pull through walls. Trees also accept the same attacks, combo and spin hits. Kick cracks trees for the next critical without moving them; stage 2 pulls dropped wood. Felling a tree gives the same spin duration bonus as a defeat. One valid follow-up may be queued. Returns actual state; actions advance in real time.',
       inputSchema: { type: 'object', properties: { skill: { type: 'string', enum: ['charge','slam','kick','sweep','spin'] } }, required: ['skill'], additionalProperties: false },
       annotations: { readOnlyHint: false, untrustedContentHint: false },
       execute(input) {

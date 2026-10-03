@@ -39,21 +39,23 @@ test('first report reward survives reload, can only be claimed in town once, rep
 });
 test('cone waits for its warning, does modest damage, and is avoidable by stepping behind',()=>{
   for(const dodge of [false,true]){const s=start(setup());locate(s,FIELD.x+3,FIELD.z);s.r.boss.begin('sweep',s.p);tick(s,2.1);assert.equal(s.h.hp,100);
-    if(dodge)locate(s,FIELD.x-3,FIELD.z);tick(s,.14);assert.equal(s.h.hp,dodge?100:84);}
+    if(dodge)locate(s,FIELD.x-3,FIELD.z);tick(s,.14);assert.equal(s.h.hp,dodge?100:80);}
 });
 test('lightning tracks then locks; leaving the locked mark avoids impact and its persistent pool',()=>{
   const s=start(setup());locate(s,-25,15);s.r.boss.begin('brand',s.p);tick(s,1);locate(s,-25,20);tick(s,1.55);const mark=s.r.boss.hazards[0];assert.equal(mark.locked,true);assert.equal(mark.z,20);
   locate(s,-30,20);tick(s,1.5);assert.equal(mark.z,20);assert.equal(s.h.hp,100);assert.ok(mark.fired);assert.ok(s.r.boss.hazards.length);
-  s.r.boss.cooldown=999;locate(s,mark.x,mark.z);tick(s,1.1);assert.equal(s.h.hp,96);locate(s,-30,20);tick(s,8);assert.equal(s.r.boss.hazards.length,0);
+  s.r.boss.cooldown=999;locate(s,mark.x,mark.z);tick(s,1.1);assert.equal(s.h.hp,90);locate(s,-30,20);tick(s,8);assert.equal(s.r.boss.hazards.length,0);
 });
 test('inner-to-outer pulse leaves enough time to move into the cleared centre',()=>{
   const s=start(setup());locate(s,FIELD.x+5.5,FIELD.z);s.r.boss.begin('pulse',s.p);tick(s,2.3);assert.equal(s.h.hp,100);locate(s,FIELD.x+3,FIELD.z);tick(s,1.7);assert.equal(s.h.hp,100);
-  const other=start(setup());locate(other,FIELD.x+5.5,FIELD.z);other.r.boss.begin('pulse',other.p);tick(other,4);assert.equal(other.h.hp,82);
+  const other=start(setup());locate(other,FIELD.x+5.5,FIELD.z);other.r.boss.begin('pulse',other.p);tick(other,4);assert.equal(other.h.hp,78);
 });
-test('lightning on the active rune breaks the stone and grants exactly eight seconds of +40% damage',()=>{
-  const s=start(setup());s.r.boss.begin('resonance',s.p);const stone=s.r.boss.stones.find(x=>x.charged);locate(s,stone.x,stone.z);tick(s,4.9);locate(s,stone.x+3,stone.z);tick(s,1.45);
+test('lightning removes 25% stone armor and grants eight seconds of +40% damage before armor returns',()=>{
+  const s=start(setup());assert.equal(s.r.boss.state().armorReduction,.25);assert.equal(s.h.damageEntity(s.u,100,0,0).damage,75);
+  s.r.boss.begin('resonance',s.p);const stone=s.r.boss.stones.find(x=>x.charged);locate(s,stone.x,stone.z);tick(s,4.9);locate(s,stone.x+3,stone.z);tick(s,1.45);
   assert.equal(s.r.boss.stats.stoneBreaks,1);assert.ok(s.u.exposed>7.9);assert.equal(s.r.boss.hazards.length,0);assert.equal(s.h.hp,100);assert.equal(s.h.damageEntity(s.u,100,0,0).damage,140);
-  tick(s,8.1);assert.equal(s.u.exposed,0);assert.equal(s.h.damageEntity(s.u,100,0,0).damage,100);
+  assert.equal(s.r.boss.state().armorReduction,0);
+  tick(s,8.1);assert.equal(s.u.exposed,0);assert.equal(s.r.boss.state().armorReduction,.25);assert.equal(s.h.damageEntity(s.u,100,0,0).damage,75);
 });
 test('kicks cannot replace the stone mechanic, missed stones leave a pool and are offered again',()=>{
   const s=start(setup());locate(s,FIELD.x,FIELD.z);s.r.boss.begin('resonance',s.p);assert.equal(s.r.boss.interrupt(s.u),false);s.h.damageEntity(s.u,1,0,0,{source:'kick'});assert.equal(s.u.exposed,0);
@@ -61,8 +63,8 @@ test('kicks cannot replace the stone mechanic, missed stones leave a pool and ar
   s.r.boss.patternIndex=3;s.r.boss.cooldown=0;tick(s,.01);assert.equal(s.r.boss.cast.id,'resonance');assert.ok(s.r.boss.stones.some(s=>s.charged));assert.equal(s.r.boss.hazards.length,1);
 });
 test('simultaneous hits share grace and combat health cannot passively regenerate',()=>{
-  const s=start(setup());for(let i=0;i<2;i++)s.r.boss.addHazard({shape:'circle',x:s.p.x,z:s.p.z,radius:3,delay:1},'brand');tick(s,1.1);assert.equal(s.h.hp,84);assert.equal(s.r.boss.stats.playerHits,1);
-  s.r.boss.cooldown=999;tick(s,9);assert.equal(s.h.hp,84);s.r.abort();s.h.update(1,s.p);assert.equal(s.h.hp,88);
+  const s=start(setup());for(let i=0;i<2;i++)s.r.boss.addHazard({shape:'circle',x:s.p.x,z:s.p.z,radius:3,delay:1},'brand');tick(s,1.1);assert.equal(s.h.hp,80);assert.equal(s.r.boss.stats.playerHits,1);
+  s.r.boss.cooldown=999;tick(s,9);assert.equal(s.h.hp,80);s.r.abort();s.h.update(1,s.p);assert.equal(s.h.hp,84);
 });
 test('thresholds offer overloads; final phase only pairs the pulse and brand',()=>{
   const s=start(setup());s.u.hp=s.u.maxHp*.64;s.r.boss.cooldown=0;tick(s,.01);assert.equal(s.r.boss.phase,2);assert.equal(s.r.boss.cast.id,'resonance');

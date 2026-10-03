@@ -159,5 +159,5 @@ export function createAvatar(scene) {
     mesh(new THREE.BoxGeometry(.25, .18, .37), boots, 0, -.70, .07, leg); legs.push(leg);
   }
   root.rotation.y = Math.PI;
-  return { root, body, arms, legs, scarf };
+  return { root, body, arms, legs, scarf, jacket };
 }

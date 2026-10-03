@@ -3,14 +3,17 @@ import { KickPower } from './kick-power.js';
 import { BATTLE, inAttackArea } from './battle-rules.js';
 
 export const SPIN = Object.freeze({ duration: 2.5, maxDuration: 4, interval: .25, radius: 3.2, pullRadius: 6, pullSpeed: 6, damage: 8, empoweredDamage: 10, criticalExtension: .25, killExtension: .5 });
+// Per cast, never per target: short finishes earn 50, long finishes earn 100.
+export const ULTIMATE_CHARGE = Object.freeze({max:100,charge:10,slam:20,kick:20,sweep:20,shortBonus:10,longBonus:40});
 const comboOrder = ['charge', 'slam', 'kick', 'sweep'];
+const newCombo = () => ({step:0,remaining:0,failure:null,route:null});
 const aimsOnStart = id => id === 'kick' || id === 'sweep';
 export const WARRIOR_SKILLS = [
   { id: 'charge', key: '1', ...BATTLE.charge, duration: .42, detail: '전방으로 돌파' },
   { id: 'slam', key: '2', ...BATTLE.slam, duration: .78, detail: '날을 세워 땅에 내려찍기' },
   { id: 'kick', key: '3', name: '날아차기', detail: '도끼를 짚고 앞으로 날아차기', duration: .90, cooldown: 1.2 },
   { id: 'sweep', key: '4', ...BATTLE.sweep, duration: 1.10, detail: '도끼를 끌어와 크게 가로베기' },
-  { id: 'spin', key: '5', name: '회전베기', detail: '4연계 적중으로 여는 궁극기', duration: SPIN.duration, cooldown: 0 },
+  { id: 'spin', key: '5', name: '회전베기', detail: '게이지 100으로 사용하는 궁극기', duration: SPIN.duration, cooldown: 0 },
 ];
 const skillById = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, s]));
 const followups = { charge: ['slam'], slam: ['kick', 'sweep'], kick: ['sweep'], sweep: ['spin'], slash: [], spin: [] };
@@ -25,18 +28,19 @@ export class Warrior {
     this.active = null; this.planted = null; this.carried = null; this.queued = null; this.lastSkill = null;
     this.aimDirection = null;
     this.kickPower = new KickPower(); this.lastKick = null;
-    this.combo = { step: 0, remaining: 0, failure: null };
-    this.ultimate = { ready: false, lastSpin: null };
+    this.combo = newCombo();
+    this.ultimate = { charge:0, ready:false, lastGain:null, lastSpin:null };
     this.executions = Object.fromEntries(WARRIOR_SKILLS.map(s => [s.id, 0]));
   }
   cancel(resetCooldowns = false, clearUltimate = false) {
     this.breakCombo('연계 중단');
     this.active = null; this.planted = null; this.carried = null; this.queued = null;
-    if (resetCooldowns || clearUltimate) this.ultimate.ready = false;
+    if (resetCooldowns || clearUltimate) {this.ultimate.charge=0;this.ultimate.ready=false;this.ultimate.lastGain=null;}
     if (resetCooldowns) { for (const id in this.cooldowns) this.cooldowns[id] = 0; this.lastKick = null; this.ultimate.lastSpin = null; this.combo.failure = null; }
   }
   get comboWindow() { return 3 + (this.combat.progression?.bonuses.combo ?? 0); }
   get followup() { return this.planted ?? this.carried; }
+  get nextSkills() { return this.combo.step===1?['slam']:this.combo.step===2?['kick','sweep']:this.combo.step===3?['sweep']:[]; }
   interrupt(heavy = false) {
     if (heavy) { this.cancel(); return; }
     const a = this.active, grip = this.followup ?? a?.followup ?? a?.anchor;
@@ -46,12 +50,12 @@ export class Warrior {
     if (a && comboOrder.includes(a.id) && !a.hit && !a.launched && !a.hitIds.size) this.cooldowns[a.id] = 0;
     this.carried = grip && !['charge','slash','spin'].includes(a?.id) && !(a?.id === 'sweep' && a.hit)
       ? { kicked: a?.id === 'kick' ? a.hit : !!grip.kicked, remaining: grip.remaining > 0 ? grip.remaining : this.comboWindow } : null;
-    if (this.combo.step > 0 && !this.ultimate.ready && this.combo.remaining <= 0) this.combo.remaining = this.comboWindow;
+    if (this.combo.step > 0 && this.combo.step < 4 && this.combo.remaining <= 0) this.combo.remaining = this.comboWindow;
     this.active = null; this.planted = null;
-    if (this.queued && (this.combo.step > 0 ? this.queued.id !== comboOrder[this.combo.step] : ['kick','sweep'].includes(this.queued.id) && !this.carried)) this.queued = null;
+    if (this.queued && ((this.combo.step>0&&this.combo.step<4&&!this.nextSkills.includes(this.queued.id)) || (['kick','sweep'].includes(this.queued.id)&&!this.carried))) this.queued = null;
   }
   finishDodge() {
-    if (this.combo.step > 0 && !this.ultimate.ready) this.combo.remaining = Math.max(2, this.combo.remaining);
+    if (this.combo.step > 0 && this.combo.step < 4) this.combo.remaining = Math.max(2, this.combo.remaining);
     if (this.carried) this.carried.remaining = Math.max(2, this.carried.remaining);
   }
   reason(id, player, wait = 0) {
@@ -61,7 +65,7 @@ export class Warrior {
     if (this.combat.hp <= 0) return '먼저 다시 일어나 주세요.';
     if (this.combat.weapon !== 'axe') return 'Z 키로 양손 도끼를 들어 주세요.';
     if (!player.grounded && !wait) return '땅에 발을 딛은 뒤 사용해 주세요.';
-    if (id === 'spin' && !this.ultimate.ready) return '1 → 2 → 3 → 4를 모두 적중시키면 회전베기가 열려요.';
+    if (id === 'spin' && !this.ultimate.ready) return `궁극기 ${this.ultimate.charge}/100 · 2→4 짧은 연계나 2→3→4 긴 연계로 충전하세요.`;
     if (this.cooldowns[id] > wait) return `${skillById[id].name} 재사용까지 ${this.cooldowns[id].toFixed(1)}초`;
     if (this.combat.cooldown > wait && !this.combat.autoAttackRecovery) return '기본 공격이 끝나면 사용할 수 있어요.';
     if (['kick', 'sweep'].includes(id) && !this.followup) return '2번 내려찍기로 먼저 도끼를 박아 주세요.';
@@ -121,12 +125,12 @@ export class Warrior {
     if (this.planted && aimsOnStart(id)) this.planted.facing = { ...facing };
     if (id === 'spin') {
       this.active.duration+=this.combat.progression?.bonuses.spinDuration??0;
-      this.ultimate.ready = false; this.planted = null; this.combo = { step: 0, remaining: 0, failure: null };
+      this.ultimate.charge=0;this.ultimate.ready=false;this.ultimate.lastGain=null;this.planted=null;this.combo=newCombo();
       Object.assign(this.active, { stage: 1, nextPulse: SPIN.interval, streak: 0, pulses: 0, hits: 0, criticalPulses: 0, kills: 0, extended: 0 });
       this.ultimate.lastSpin = null;
-    } else if (comboOrder.includes(id) && !this.ultimate.ready) {
-      if (id === 'charge') this.combo = { step: 0, remaining: 0, failure: null };
-      this.active.comboEligible = id === comboOrder[this.combo.step];
+    } else if (comboOrder.includes(id)) {
+      if (id==='charge'||(id==='slam'&&this.combo.step!==1)) this.combo=newCombo();
+      this.active.comboEligible = ['charge','slam'].includes(id)||this.nextSkills.includes(id);
       if (this.active.comboEligible) this.combo.remaining = 0;
       else this.breakCombo('기술 순서가 바뀌었어요');
     }
@@ -136,18 +140,27 @@ export class Warrior {
     this.combat.events.push({ type: 'warrior-start', skill: id, x: player.x, y: player.y, z: player.z, dx: facing.x, dz: facing.z });
   }
   breakCombo(reason) {
-    const hadProgress = (this.combo.step > 0 || this.active?.comboEligible) && !this.ultimate.ready;
-    this.combo.step = 0; this.combo.remaining = 0;
+    const hadProgress = (this.combo.step>0&&this.combo.step<4)||(this.active?.comboEligible&&!this.combo.route);
+    this.combo.step=0;this.combo.remaining=0;this.combo.route=null;
     if (hadProgress) { this.combo.failure = reason; this.combat.events.push({ type: 'combo-break', reason }); }
   }
   recordComboHit() {
     const a = this.active;
-    if (!a.comboEligible || a.comboCounted || this.ultimate.ready) return;
-    a.comboCounted = true; this.combo.step++; this.combo.failure = null;
-    if (this.combo.step === comboOrder.length) {
-      this.ultimate.ready = true; this.combo.remaining = 0;
-      this.combat.events.push({ type: 'ultimate-ready' });
+    if(!comboOrder.includes(a.id)||a.chargeCounted)return;
+    a.chargeCounted=true;let gain=ULTIMATE_CHARGE[a.id],route=null;
+    if(a.comboEligible){
+      const previous=this.combo.step;a.comboCounted=true;
+      this.combo.step=comboOrder.indexOf(a.id)+1;this.combo.failure=null;
+      if(a.id==='sweep'){
+        route=previous===3?'long':'short';this.combo.route=route;
+        gain+=route==='long'?ULTIMATE_CHARGE.longBonus:ULTIMATE_CHARGE.shortBonus;
+      }
     }
+    if(this.ultimate.ready)return;
+    const amount=Math.min(gain,ULTIMATE_CHARGE.max-this.ultimate.charge);
+    this.ultimate.charge+=amount;this.ultimate.lastGain={amount,skill:a.id,route,time:this.combat.time};
+    this.combat.events.push({type:'ultimate-charge',amount,charge:this.ultimate.charge,route});
+    if(this.ultimate.charge===ULTIMATE_CHARGE.max){this.ultimate.ready=true;this.combat.events.push({type:'ultimate-ready'});}
   }
   spinTargets(player, radius) {
     return this.combat.targets().filter(e => e.alive && !(e.dodge && e.dodge.elapsed < BATTLE.evade.invulnerable)
@@ -241,7 +254,7 @@ export class Warrior {
       }
       const context = kick ? { source: 'kick', kickPower: a.kickPower.id, powerName: a.kickPower.name } : {source:a.id};
       a.hitIds.add(e.id); const result=combat.damageEntity(e, kick ? a.kickPower.damage : damage, a.dx, a.dz, context);
-      if(result?.evaded)continue;
+      if(!result||result.damage<=0||result.evaded)continue;
       if (offBalance > 0) combat.applyOffBalance(e, offBalance);
       if(e.kind!=='tree'&&!e.ccImmune){e.knockX = a.dx * knock; e.knockZ = a.dz * knock; e.stagger = stagger; e.windup = 0; e.recovery = Math.max(e.recovery, stagger);}
       if (kick) combat.launchEntity(e, a.dx, a.dz, a.kickPower);
@@ -269,7 +282,10 @@ export class Warrior {
     if (this.combat.tactics?.busy) return;
     if (this.combo.remaining > 0) {
       this.combo.remaining = Math.max(0, this.combo.remaining-dt);
-      if (this.combo.remaining === 0) { this.carried=null; this.queued=null; this.breakCombo('연계 시간이 지났어요'); }
+      if(this.combo.remaining===0){
+        if(this.combo.route)this.combo=newCombo();
+        else {this.carried=null;this.queued=null;this.breakCombo('연계 시간이 지났어요');}
+      }
     }
     if (!this.active) {
       if (this.planted) { this.planted.remaining -= dt; if (this.planted.remaining <= 0) { this.planted = null; this.breakCombo('도끼를 회수했어요'); } }
@@ -314,7 +330,7 @@ export class Warrior {
     }
     if (a.elapsed >= a.duration) {
       if (a.comboEligible && !a.comboCounted) this.breakCombo('공격이 빗나갔어요');
-      else if (a.comboCounted && !this.ultimate.ready) this.combo.remaining = 3+(this.combat.progression?.bonuses.combo??0);
+      else if (a.comboCounted) this.combo.remaining = this.combo.route?2.5:this.comboWindow;
       this.active = null;
       this.flushQueue(0, player);
     }
@@ -322,12 +338,12 @@ export class Warrior {
   state() {
     return { class: 'warrior', activeSkill: this.active?.id ?? null, progress: this.active ? +(this.active.elapsed / this.active.duration).toFixed(3) : 0,
       facing: this.facing(),
-      carriedFollowup: this.carried ? (this.carried.kicked ? 'sweep' : 'kick') : null, comboPaused: !!this.combat.tactics?.busy && this.combo.step>0,
+      carriedFollowup: this.carried ? (this.carried.kicked ? 'sweep' : 'kick') : null, comboPaused: !!this.combat.tactics?.busy && this.combo.step>0 && this.combo.step<4,
       axePlanted: !!this.planted, followupSeconds: this.followup ? +this.followup.remaining.toFixed(2) : 0, kicked: !!this.followup?.kicked,
       axeAnchor: this.planted ? { x: +this.planted.x.toFixed(2), y: +this.planted.y.toFixed(2), z: +this.planted.z.toFixed(2) } : null,
       lastKick: this.lastKick ? { ...this.lastKick } : null,
-      combo: { step: this.ultimate.ready ? 4 : this.combo.step, nextSkill: this.ultimate.ready ? null : comboOrder[this.combo.step], remaining: +this.combo.remaining.toFixed(2), failure: this.combo.failure },
-      ultimate: { ready: this.ultimate.ready, active: this.active?.id==='spin', stage: this.active?.id==='spin'?this.active.stage:0,
+      combo: { step:this.combo.step,nextSkill:this.nextSkills[0]??null,nextSkills:this.nextSkills,route:this.combo.route,remaining:+this.combo.remaining.toFixed(2),failure:this.combo.failure },
+      ultimate: { charge:this.ultimate.charge,maxCharge:ULTIMATE_CHARGE.max,lastGain:this.ultimate.lastGain?{...this.ultimate.lastGain}:null,ready: this.ultimate.ready, active: this.active?.id==='spin', stage: this.active?.id==='spin'?this.active.stage:0,
         remaining: this.active?.id==='spin'?+(this.active.duration-this.active.elapsed).toFixed(2):0,
         streak: this.active?.id==='spin'?this.active.streak:0, lastSpin: this.ultimate.lastSpin ? {...this.ultimate.lastSpin} : null },
       queuedSkill: this.queued?.id ?? null, cooldowns: Object.fromEntries(Object.entries(this.cooldowns).map(([id, value]) => [id, +value.toFixed(2)])), executions: { ...this.executions } };
